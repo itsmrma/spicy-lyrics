@@ -71,6 +71,13 @@
   scale: 0.94;
 }
 
+/* Only shown while the playing track ships transliterations (NPVLyrics.ts sets
+   the attribute). Stated explicitly because .CardControl's display: flex would
+   otherwise beat the user agent's [hidden] rule. */
+#SpicyLyricsNPVCard .CardControl[hidden] {
+  display: none;
+}
+
 #SpicyLyricsNPVCard .CardControl svg {
   width: 18px;
   height: 18px;
