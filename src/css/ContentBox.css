@@ -614,6 +614,7 @@
   align-items: center;
   cursor: pointer;
   justify-content: center;
+  position: relative;
   transition: opacity 0.175s cubic-bezier(0.37, 0, 0.63, 1),
     filter 0.175s ease-out !important; /* Added filter transition */
   --ShrinkScale: 0.9;
@@ -835,17 +836,24 @@
 }
 
 /* --accent is often white here, which left an enabled shuffle or repeat looking exactly like a
-   disabled one; the glow is what tells them apart. Two stacked shadows: a tight one that traces the
-   glyph and a wide, faint halo. The svg's filter transition fades it in and out. */
+   disabled one. A dot under the glyph marks the on state without the glow the two stacked
+   drop-shadows used to add. */
 #SpicyLyricsPage.Fullscreen
   .ContentBox
   .NowBar
   .CenteredView
   .Header
   .PlaybackControls
-  .PlaybackControl:is(.ShuffleToggle, .LoopToggle).Enabled
-  > svg {
-  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.5)) drop-shadow(0 0 6px rgba(255, 255, 255, 0.28));
+  .PlaybackControl:is(.ShuffleToggle, .LoopToggle).Enabled::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 0.6cqw;
+  height: 0.6cqw;
+  border-radius: 50%;
+  background-color: currentColor;
+  translate: -50% 0;
 }
 
 @keyframes pressAnimation {
