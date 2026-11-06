@@ -3,6 +3,7 @@ import Spline from "cubic-spline";
 import { easeSinOut } from "d3-ease";
 import { $currentLyricsType, $simpleLyricsMode } from "../../../../utils/stores.ts";
 import {
+  InvalidateLyricsFrame,
   LyricsObject,
   SimpleLyricsMode_LetterEffectsStrengthConfig,
   type SyllableLead,
@@ -16,7 +17,7 @@ import {
   syncDetachedBackgroundLines,
 } from "../../LyricsVirtualizer.ts";
 import { Spring } from "../../../../modules/Spring.ts";
-import { isExperimentEnabled } from "../../../experiments.ts";
+import { $experiment, isExperimentEnabled } from "../../../experiments.ts";
 /* import { CurveInterpolator } from "curve-interpolator"; */
 
 // Define types for animation ranges
@@ -590,6 +591,42 @@ function stepRefreshedLetter(
   return !settled;
 }
 
+// The gradient one letter shows: dim before it is sung, lit after, and in
+// between the light of the line's sweep where it can be measured, or one letter
+// after another for the letter being sung.
+function getLetterGradient(
+  letterState: "NotSung" | "Active" | "Sung",
+  index: number,
+  activeIndex: number,
+  activePercentage: number,
+  waveFlame: RefreshedFlameState | null,
+  sweep: LineSweep | null,
+  wordIndex: number
+): number {
+  const dim = $simpleLyricsMode.get() ? -50 : -20;
+  const active = index === activeIndex;
+  let gradient: number;
+  if (letterState === "NotSung") gradient = dim;
+  else if (letterState === "Sung") gradient = 100;
+  else if (!active) gradient = dim;
+  else if ($simpleLyricsMode.get()) gradient = -50 + 120 * easeSinOut(activePercentage);
+  else gradient = -20 + 120 * easeSinOut(activePercentage);
+
+  if (!waveFlame) return gradient;
+  const swept = sweep && getSweepLetterPosition(sweep, wordIndex, index);
+  return swept ?? (active ? -50 + 150 * activePercentage : gradient);
+}
+
+// Split letters carry their own gradient: the sweep reads --SLM_GradientPosition
+// under Simple Lyrics Mode, the plain fill reads --gradient-position.
+function setLetterGradient(letter: SplitLetter, gradient: number): void {
+  setStyleIfChanged(
+    letter.HTMLElement,
+    $simpleLyricsMode.get() ? "--SLM_GradientPosition" : "--gradient-position",
+    `${gradient}%`
+  );
+}
+
 // Promote an element to its own compositor layer for GPU-accelerated animations.
 // Only lines go through here. Words, letters and dots get their layer from CSS
 // (Mixed.css) while their line is Active: an inline will-change on every word
@@ -976,6 +1013,63 @@ let lastFrameTime = performance.now();
 // writes the correct --BlurAmount to the freshly connected element.
 setOnNewElementMounted(() => {
   Blurring_LastLine = null;
+  // A row that mounts while playback is paused still needs its line classes and
+  // its gradient, so ask the frame loop for one more frame.
+  InvalidateLyricsFrame();
+});
+
+// Performance Mode drops the per-letter springs and the glow writes, so the
+// values the animator already put on screen have to come off, together with the
+// cache that holds them: the springs compare against it, and a stale entry would
+// make them skip the write that puts the value back once the flag is turned off.
+const LETTER_STYLE_PROPS = [
+  "transform",
+  "scale",
+  "--text-shadow-blur-radius",
+  "--text-shadow-opacity",
+];
+const LINE_STYLE_PROPS = ["--BlurAmount"];
+
+function clearAnimationStyles(el: HTMLElement, props: string[]): void {
+  const cache = _styleCache.get(el);
+  if (!cache) return;
+  for (const prop of props) {
+    if (!cache.delete(prop)) continue;
+    el.style.removeProperty(prop);
+  }
+}
+
+// The blur path promotes lines to their own compositor layers. With the blur
+// gone there is nothing left for a layer to animate, so let it go; the next
+// applyBlur after the flag is turned off promotes the line again.
+function demoteLine(el: HTMLElement): void {
+  if (!_gpuPromotedLines.delete(el)) return;
+  el.style.removeProperty("will-change");
+  el.style.removeProperty("backface-visibility");
+}
+
+function clearPerformanceModeStyles(): void {
+  const clearLine = (line: {
+    HTMLElement: HTMLElement;
+    Syllables?: { Lead: SyllableLead[] };
+  }): void => {
+    clearAnimationStyles(line.HTMLElement, LINE_STYLE_PROPS);
+    demoteLine(line.HTMLElement);
+    for (const word of line.Syllables?.Lead ?? []) {
+      for (const letter of word.Letters ?? []) {
+        clearAnimationStyles(letter.HTMLElement, LETTER_STYLE_PROPS);
+      }
+    }
+  };
+  LyricsObject.Types.Syllable.Lines.forEach(clearLine);
+  LyricsObject.Types.Line.Lines.forEach(clearLine);
+  // applyBlur only runs when the active line changes, so the next frame has to
+  // look like a change for the line blur to come back.
+  Blurring_LastLine = null;
+}
+
+$experiment("performanceMode").listen((enabled) => {
+  if (enabled) clearPerformanceModeStyles();
 });
 
 export function findActiveElement(currentTime: number): any {
@@ -1063,6 +1157,8 @@ export function Animate(position: number): void {
   const ProcessedPosition = position + timeOffset - ($simpleLyricsMode.get() ? 33.5 : 0);
   const refreshedSimple =
     $simpleLyricsMode.get() && isExperimentEnabled("refreshedSimpleLyrics");
+  // Read every frame, not once at load: a remote override can flip it mid-song.
+  const performanceMode = isExperimentEnabled("performanceMode");
   // Spline point split letters wait at before they're sung: shrunk and low
   // normally, plain text under the refreshed wave (which starts from rest).
   const letterRest = refreshedSimple ? 1 : 0;
@@ -1086,6 +1182,9 @@ export function Animate(position: number): void {
     blurMultiplierValue: number
   ): void => {
     if (!arr[activeIndex]) return;
+    // Performance Mode drops the distance blur on the surrounding lines, so
+    // there is no amount to write and no layer to keep for it.
+    if (performanceMode) return;
 
     // Promote line elements for filter changes
     promoteLineToGPU(arr[activeIndex].HTMLElement);
@@ -1491,8 +1590,47 @@ export function Animate(position: number): void {
               const waveFlame = waveStrength
                 ? getRefreshedFlame(word.Letters, ProcessedPosition, !!word.BGWord)
                 : null;
+              // The letter being sung and how far into it the audio is: the same
+              // for every letter of the word, so worked out once.
+              let activeLetterIndex = -1;
+              let activeLetterPercentage = 0;
+              for (let i = 0; i < word.Letters.length; i++) {
+                if (
+                  getElementState(
+                    ProcessedPosition,
+                    word.Letters[i].StartTime,
+                    word.Letters[i].EndTime
+                  ) === "Active"
+                ) {
+                  activeLetterIndex = i;
+                  activeLetterPercentage = getProgressPercentage(
+                    ProcessedPosition,
+                    word.Letters[i].StartTime,
+                    word.Letters[i].EndTime
+                  );
+                  break;
+                }
+              }
               for (let k = 0; k < word.Letters.length; k++) {
                 const letter = word.Letters[k];
+
+                if (performanceMode) {
+                  // Highlight only: the letter carries its gradient and nothing
+                  // else about it moves.
+                  setLetterGradient(
+                    letter,
+                    getLetterGradient(
+                      getElementState(ProcessedPosition, letter.StartTime, letter.EndTime),
+                      k,
+                      activeLetterIndex,
+                      activeLetterPercentage,
+                      waveFlame,
+                      sweep,
+                      wordIndex
+                    )
+                  );
+                  continue;
+                }
 
                 if (!letter.AnimatorStore) {
                   letter.AnimatorStore = createLetterSprings();
@@ -1501,33 +1639,7 @@ export function Animate(position: number): void {
                   letter.AnimatorStore.Glow.SetGoal(GlowSpline.at(0), true);
                 }
 
-                let targetScale: number,
-                  targetYOffset: number,
-                  targetGlow: number,
-                  targetGradient: number;
-
-                // Find active letter info (needed only for Active state calculation)
-                let activeLetterIndex = -1;
-                let activeLetterPercentage = 0;
-                if (wordState === "Active" && word.Letters) {
-                  for (let i = 0; i < word.Letters.length; i++) {
-                    if (
-                      getElementState(
-                        ProcessedPosition,
-                        word.Letters[i].StartTime,
-                        word.Letters[i].EndTime
-                      ) === "Active"
-                    ) {
-                      activeLetterIndex = i;
-                      activeLetterPercentage = getProgressPercentage(
-                        ProcessedPosition,
-                        word.Letters[i].StartTime,
-                        word.Letters[i].EndTime
-                      );
-                      break;
-                    }
-                  }
-                }
+                let targetScale: number, targetYOffset: number, targetGlow: number;
 
                 // Determine initial targets based on word state
                 // wordState is Active - Default to resting, then apply proximity-based animation
@@ -1605,47 +1717,18 @@ export function Animate(position: number): void {
                 }
 
                 // --- Determine Gradient based on individual letter state ---
-                if (letterState === "NotSung") {
-                  if ($simpleLyricsMode.get()) {
-                    targetGradient = -50;
-                  } else {
-                    targetGradient = -20;
-                  }
-                } else if (letterState === "Sung") {
-                  targetGradient = 100;
-                } else {
-                  // Active
-                  // Only the *actual* active letter gets the animated gradient
-                  targetGradient =
-                    k === activeLetterIndex ? -20 + 120 * easeSinOut(activeLetterPercentage) : -20;
-                  if ($simpleLyricsMode.get()) {
-                    targetGradient =
-                      k === activeLetterIndex
-                        ? -50 + 120 * easeSinOut(activeLetterPercentage)
-                        : -50;
-                  } else {
-                    targetGradient =
-                      k === activeLetterIndex
-                        ? -20 + 120 * easeSinOut(activeLetterPercentage)
-                        : -20;
-                  }
-                }
-
-                if (waveFlame) {
-                  // The line's edge where it can be measured. Otherwise the
-                  // fill goes one letter after another: a letter starts when
-                  // the one before it is lit, and ends fully lit.
-                  targetGradient =
-                    (sweep && getSweepLetterPosition(sweep, wordIndex, k)) ??
-                    (k === activeLetterIndex ? -50 + 150 * activeLetterPercentage : targetGradient);
-                }
+                const targetGradient = getLetterGradient(
+                  letterState,
+                  k,
+                  activeLetterIndex,
+                  activeLetterPercentage,
+                  waveFlame,
+                  sweep,
+                  wordIndex
+                );
 
                 // Apply the calculated gradient
-                if ($simpleLyricsMode.get()) {
-                  setStyleIfChanged(letter.HTMLElement, "--SLM_GradientPosition", `${targetGradient}%`);
-                } else {
-                  setStyleIfChanged(letter.HTMLElement, "--gradient-position", `${targetGradient}%`);
-                }
+                setLetterGradient(letter, targetGradient);
                 if (waveStrength) {
                   stepRefreshedLetter(letter, k, waveStrength, waveFlame!, targetGradient);
                   continue;
@@ -1699,6 +1782,17 @@ export function Animate(position: number): void {
               for (let k = 0; k < word.Letters.length; k++) {
                 const letter = word.Letters[k];
 
+                if (performanceMode) {
+                  // Highlight only: the edge of the word before can already
+                  // reach in, but the letter itself stays at rest.
+                  setLetterGradient(
+                    letter,
+                    (sweep && getSweepLetterPosition(sweep, wordIndex, k)) ??
+                      ($simpleLyricsMode.get() ? -50 : -20)
+                  );
+                  continue;
+                }
+
                 if (!letter.AnimatorStore) {
                   letter.AnimatorStore = createLetterSprings();
                   letter.AnimatorStore.Scale.SetGoal(LetterScaleSpline.at(letterRest), true);
@@ -1709,7 +1803,7 @@ export function Animate(position: number): void {
                 if (restStrength) {
                   // The edge of the word before can already reach in.
                   const gradient = (sweep && getSweepLetterPosition(sweep, wordIndex, k)) ?? -50;
-                  setStyleIfChanged(letter.HTMLElement, "--SLM_GradientPosition", `${gradient}%`);
+                  setLetterGradient(letter, gradient);
                   stepRefreshedLetter(letter, k, restStrength, restFlame!, gradient);
                   continue;
                 }
@@ -1722,11 +1816,7 @@ export function Animate(position: number): void {
                 const currentYOffset = letter.AnimatorStore.YOffset.Step(deltaTime);
                 const currentGlow = letter.AnimatorStore.Glow.Step(deltaTime);
 
-                if ($simpleLyricsMode.get()) {
-                  setStyleIfChanged(letter.HTMLElement, "--SLM_GradientPosition", "-50%");
-                } else {
-                  setStyleIfChanged(letter.HTMLElement, "--gradient-position", `-20%`);
-                }
+                setLetterGradient(letter, $simpleLyricsMode.get() ? -50 : -20);
 
                 setStyleIfChanged(
                   letter.HTMLElement,
@@ -1763,6 +1853,15 @@ export function Animate(position: number): void {
               for (let k = 0; k < word.Letters.length; k++) {
                 const letter = word.Letters[k];
 
+                if (performanceMode) {
+                  // Highlight only: the letter ends fully lit.
+                  setLetterGradient(
+                    letter,
+                    (sweep && getSweepLetterPosition(sweep, wordIndex, k)) ?? 100
+                  );
+                  continue;
+                }
+
                 if (!letter.AnimatorStore) {
                   letter.AnimatorStore = createLetterSprings();
                   letter.AnimatorStore.Scale.SetGoal(LetterScaleSpline.at(letterRest), true);
@@ -1773,7 +1872,7 @@ export function Animate(position: number): void {
                 if (sungStrength) {
                   // The last letters finish lighting as the edge moves on.
                   const gradient = (sweep && getSweepLetterPosition(sweep, wordIndex, k)) ?? 100;
-                  setStyleIfChanged(letter.HTMLElement, "--SLM_GradientPosition", `${gradient}%`);
+                  setLetterGradient(letter, gradient);
                   stepRefreshedLetter(letter, k, sungStrength, sungFlame!, gradient);
                   continue;
                 }
@@ -1786,11 +1885,7 @@ export function Animate(position: number): void {
                 const currentYOffset = letter.AnimatorStore.YOffset.Step(deltaTime);
                 const currentGlow = letter.AnimatorStore.Glow.Step(deltaTime);
 
-                if ($simpleLyricsMode.get()) {
-                  setStyleIfChanged(letter.HTMLElement, "--SLM_GradientPosition", "100%");
-                } else {
-                  setStyleIfChanged(letter.HTMLElement, "--gradient-position", `100%`);
-                }
+                setLetterGradient(letter, 100);
                 setStyleIfChanged(
                   letter.HTMLElement,
                   "transform",
@@ -2152,6 +2247,13 @@ export function Animate(position: number): void {
               for (let k = 0; k < word.Letters.length; k++) {
                 const letter = word.Letters[k];
 
+                if (performanceMode) {
+                  // Highlight only. The letter springs were never stepped here,
+                  // so they cannot hold the line in its settling state.
+                  setLetterGradient(letter, 100);
+                  continue;
+                }
+
                 if (!letter.AnimatorStore) {
                   letter.AnimatorStore = createLetterSprings();
                   letter.AnimatorStore.Scale.SetGoal(LetterScaleSpline.at(letterRest), true);
@@ -2160,7 +2262,7 @@ export function Animate(position: number): void {
                 }
 
                 if (sungStrength) {
-                  setStyleIfChanged(letter.HTMLElement, "--SLM_GradientPosition", "100%");
+                  setLetterGradient(letter, 100);
                   // A letter still up keeps the line settling until it's back at rest.
                   if (stepRefreshedLetter(letter, k, sungStrength, sungFlame!, 100)) {
                     settled = false;
@@ -2177,11 +2279,7 @@ export function Animate(position: number): void {
                 const currentGlow = letter.AnimatorStore.Glow.Step(deltaTime);
                 track(letter.AnimatorStore);
 
-                if ($simpleLyricsMode.get()) {
-                  setStyleIfChanged(letter.HTMLElement, "--SLM_GradientPosition", "100%");
-                } else {
-                  setStyleIfChanged(letter.HTMLElement, "--gradient-position", `100%`);
-                }
+                setLetterGradient(letter, 100);
                 setStyleIfChanged(
                   letter.HTMLElement,
                   "transform",
