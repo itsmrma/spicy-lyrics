@@ -563,6 +563,28 @@
   container-type: size;
 }
 
+/* The cover layout has room below the metadata, so the transport sits there in flow
+   instead of over the artwork. Same row and button sizes: the cq units resolve
+   against the equally wide NowBar rather than the square MediaBox. */
+#SpicyLyricsPage.Fullscreen:not(.CompactMode):not(.ForcedCompactMode)
+  .ContentBox
+  .NowBar
+  .CenteredView
+  .Header
+  > .PlaybackControls {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  width: 100%;
+  height: 10cqw;
+  padding: 0 20cqw;
+  margin-top: 2cqw;
+  z-index: 2;
+  container-type: size;
+}
+
 #SpicyLyricsPage.Fullscreen .ContentBox .NowBar .CenteredView .Header:not(:has(> .Timeline)) .MediaBox .MediaContent .PlaybackControls {
   bottom: 12cqh;
 }
@@ -572,8 +594,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.TrackSkip.PrevTrack {
   rotate: 180deg;
@@ -586,8 +606,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl {
   aspect-ratio: 1;
@@ -610,8 +628,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl {
   width: 14cqw !important;
@@ -622,8 +638,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl
   svg {
@@ -635,8 +649,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.ShuffleToggle,
 #SpicyLyricsPage.Fullscreen
@@ -644,8 +656,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.LoopToggle {
   width: 7cqw;
@@ -657,8 +667,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.ShuffleToggle,
 .spicy-pip-wrapper
@@ -667,8 +675,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.LoopToggle {
   width: 10cqw !important;
@@ -679,8 +685,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.PlayStateToggle {
   width: 9.25cqw;
@@ -692,8 +696,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.PlayStateToggle {
   width: 12cqw !important;
@@ -704,8 +706,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl:not(.Pressed) {
   animation: pressAnimation 0.6s;
@@ -773,8 +773,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.Pressed {
   transform: scale(var(--ShrinkScale));
@@ -786,8 +784,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls:hover
   .PlaybackControl:not(:hover) {
   opacity: 0.5;
@@ -798,8 +794,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl:hover {
   opacity: 1 !important;
@@ -810,8 +804,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.ShuffleToggle.Enabled,
 #SpicyLyricsPage.Fullscreen
@@ -819,8 +811,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.LoopToggle.Enabled {
   color: var(--accent);
@@ -832,8 +822,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.ShuffleToggle.Enabled svg,
 #SpicyLyricsPage.Fullscreen
@@ -841,8 +829,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl.LoopToggle.Enabled svg {
   fill: var(--accent);
@@ -856,8 +842,6 @@
   .NowBar
   .CenteredView
   .Header
-  .MediaBox
-  .MediaContent
   .PlaybackControls
   .PlaybackControl:is(.ShuffleToggle, .LoopToggle).Enabled
   > svg {

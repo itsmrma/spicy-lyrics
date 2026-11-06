@@ -194,6 +194,30 @@ function RepositionTimeline() {
   PositionTimelineElement(TimelineElem);
 }
 
+// The cover layout has empty space under the metadata, so the transport goes there
+// and the artwork stays clear. The compact strip, the popup and the Canvas Stage
+// dock are built around the artwork overlay, so they keep it inside .MediaContent.
+function PlaybackControlsGoUnderMetadata() {
+  return (
+    !IsPIP &&
+    !IsCompactMode() &&
+    !PageContainer?.classList.contains("CanvasImmersive")
+  );
+}
+
+function PlacePlaybackControls() {
+  const ControlsElement = ActivePlaybackControlsInstance?.GetElement();
+  if (!ControlsElement) return;
+  const Header = PageContainer?.querySelector<HTMLElement>(".ContentBox .NowBar .Header");
+  if (!Header) return;
+  const Target = PlaybackControlsGoUnderMetadata()
+    ? Header
+    : Header.querySelector<HTMLElement>(".MediaBox .MediaContent");
+  // Re-appending the same child would restart its CSS animations.
+  if (!Target || !ControlsElement.isConnected || ControlsElement.parentElement === Target) return;
+  Target.appendChild(ControlsElement);
+}
+
 function OpenNowBar(skipSaving: boolean = false) {
   const NowBar = PageContainer?.querySelector(".ContentBox .NowBar");
   if (!NowBar) return;
@@ -224,9 +248,11 @@ function OpenNowBar(skipSaving: boolean = false) {
 
     if (!MediaBox) return;
 
-    const existingPlaybackControls = MediaBox.querySelector(".PlaybackControls");
+    const existingPlaybackControls = PageContainer?.querySelector(
+      ".ContentBox .NowBar .PlaybackControls"
+    );
     if (existingPlaybackControls) {
-      MediaBox.removeChild(existingPlaybackControls);
+      existingPlaybackControls.remove();
     }
 
     // Let's Apply more data into the fullscreen mode.
@@ -1066,6 +1092,8 @@ function OpenNowBar(skipSaving: boolean = false) {
           if (viewControls) MediaBox.appendChild(viewControls);
           MediaBox.appendChild(fragment);
 
+          PlacePlaybackControls();
+
           /* AppendQueue.forEach((element) => {
                         if (element.classList.contains("marqueeify")) {
                             const childMarquee = element.querySelector("span");
@@ -1092,6 +1120,17 @@ function OpenNowBar(skipSaving: boolean = false) {
         }
       );
       NowBarFullscreenMaid.Give({ Destroy: mediaContentTask.Cancel });
+
+      // Compact mode and the Canvas Stage dock can turn on or off while fullscreen
+      // stays open, so the transport follows whichever layout is current.
+      if (PageContainer) {
+        const placementObserver = new MutationObserver(PlacePlaybackControls);
+        placementObserver.observe(PageContainer, {
+          attributes: true,
+          attributeFilter: ["class"],
+        });
+        NowBarFullscreenMaid.Give(() => placementObserver.disconnect());
+      }
     }
   }
 
@@ -1240,6 +1279,12 @@ function CleanUpActiveComponents() {
     ".ContentBox .NowBar .Header > .Timeline"
   );
   if (headerTimeline) headerTimeline.remove();
+
+  // The cover layout keeps the transport under the metadata, outside .MediaContent.
+  const headerPlaybackControls = PageContainer?.querySelector(
+    ".ContentBox .NowBar .Header > .PlaybackControls"
+  );
+  if (headerPlaybackControls) headerPlaybackControls.remove();
 
   // // console.log("Finished CleanUpActiveComponents Process");
 }
