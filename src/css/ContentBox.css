@@ -2290,3 +2290,84 @@
 #SpicyLyricsPage .MediaImageContainer .fi_FromImage.MB_anim_fimg::before {
   opacity: 1;
 }
+
+/* ── Performance Mode ─────────────────────────────────────────────────────────
+   Every plate below is frosted glass in the default look. Here the blur is
+   dropped and the plate becomes a flat dark tint, dense enough that white text
+   and icons still read over the artwork without the blur doing the work. */
+
+#SpicyLyricsPage.Exp_PerformanceMode {
+  --SL-PerfSurface: rgba(18, 18, 22, 0.72);
+  --SL-PerfSurfaceHover: rgba(38, 38, 44, 0.82);
+  /* Surfaces that paint from a material token lose the blur with the token. */
+  --material-regular-blur: none;
+  --material-thick-blur: none;
+  --material-ultraThin-blur: none;
+}
+
+/* Loading skeleton: the shimmer gradient is the surface, only the blur goes. */
+#SpicyLyricsPage.Exp_PerformanceMode .Skeletoned {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Fullscreen view controls. */
+#SpicyLyricsPage.Exp_PerformanceMode.Fullscreen
+  .ContentBox
+  .NowBar
+  .CenteredView
+  .Header
+  .MediaBox
+  .MediaContent
+  .ViewControls
+  .ViewControl {
+  background: var(--SL-PerfSurface) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode.Fullscreen
+  .ContentBox
+  .NowBar
+  .CenteredView
+  .Header
+  .MediaBox
+  .MediaContent
+  .ViewControls
+  .ViewControl:hover {
+  background: var(--SL-PerfSurfaceHover) !important;
+}
+
+/* Frosted progress track. The legacy skin is a plain gradient and needs nothing. */
+#SpicyLyricsPage.Exp_PerformanceMode.Exp_NewProgressBar .Timeline .SliderBar {
+  background: var(--SL-PerfSurface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Seek/volume preview bubble. */
+#SpicyLyricsPage.Exp_PerformanceMode .ContentBox .ScrubPreview {
+  background: var(--SL-PerfSurface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Volume capsule. */
+#SpicyLyricsPage.Exp_PerformanceMode.Fullscreen.ShowVolumeSlider.Exp_NewProgressBar
+  .ContentBox
+  .NowBar
+  .CenteredView
+  .Header
+  .MediaBox
+  .MediaContent
+  .VolumeControl {
+  background: var(--SL-PerfSurface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Artwork crossfade: a masked blur of the incoming cover. With no blur it has
+   nothing left to paint, so it skips the layer entirely. */
+#SpicyLyricsPage.Exp_PerformanceMode .MediaImageContainer .fi_FromImage::before {
+  display: none;
+}
