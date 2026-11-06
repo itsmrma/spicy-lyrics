@@ -248,9 +248,14 @@ const detectPresentScripts = (
   return SCRIPT_PRIORITY.filter((script) => present.has(script));
 };
 
-// Whether an entry already carries a transliteration (e.g. supplied by the API).
+// Whether an entry already carries a usable transliteration (e.g. supplied by
+// the API). One that still contains characters from the script it was meant to
+// transliterate is not usable: regenerating it is the only way to avoid showing
+// Japanese (or Cyrillic, or Greek) in the romanized view.
 const hasTransliteration = (entry: any): boolean =>
-  typeof entry.TransliteratedText === "string" && entry.TransliteratedText !== "";
+  typeof entry.TransliteratedText === "string" &&
+  entry.TransliteratedText !== "" &&
+  !ResidualScriptTest.test(entry.TransliteratedText);
 
 // Romanize a single entry by composing every present-script converter whose
 // characters it contains, in priority order, feeding each step's output forward.
