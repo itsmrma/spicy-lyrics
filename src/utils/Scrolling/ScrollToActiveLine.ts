@@ -23,6 +23,7 @@ import {
   lyricsUseRefreshedLayout,
   scrollLyricsToIndex,
 } from "../Lyrics/LyricsVirtualizer.ts";
+import { isExperimentEnabled } from "../experiments.ts";
 import { IsScrollbarDragging } from "./Simplebar/ScrollSimplebar.ts";
 
 // Define intersection types that include _LineIndex
@@ -335,11 +336,27 @@ export function ScrollToActiveLine(ScrollSimplebar: any) {
     return;
   }
 
+  const previousPosition = lastPosition;
   lastPosition = Position;
 
   // A held scrollbar thumb is user scrolling too; without this the list slid
   // out from under it on the next line change.
   if (IsScrollbarDragging()) handleUserScroll(ScrollSimplebar);
+
+  // Performance Mode: paused, unchanged since the last frame and with nothing
+  // queued, this frame would walk every line and re-read layout only to reach
+  // the same answer. A seek, resume, track change or queued scroll changes one
+  // of these inputs, so they still go through.
+  if (
+    isExperimentEnabled("performanceMode") &&
+    !SpotifyPlayer.IsPlaying &&
+    previousPosition === Position &&
+    !smoothForceScrollQueued &&
+    !forceScrollQueued &&
+    lastLine != null
+  ) {
+    return;
+  }
 
   if (isSmoothForceScrollQueued) {
     if (!allowForceScrolling) return;
