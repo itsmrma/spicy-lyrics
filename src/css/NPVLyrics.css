@@ -17,6 +17,14 @@
   max-height: 350px;
 }
 
+/* Hairline edge, so the card reads as its own surface over the artwork instead
+   of blending into it. Drawn as an inset shadow: a real border would grow the
+   box and push the body's fixed height around. Expanded is the full-panel
+   takeover, which is meant to be edge-to-edge and borderless. */
+#SpicyLyricsNPVCard:not(.Expanded) {
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
 #SpicyLyricsNPVCard .CardHeader {
   display: flex;
   align-items: center;
