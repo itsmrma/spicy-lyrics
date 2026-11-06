@@ -583,6 +583,16 @@ body:not(.SpicyLyrics_StaticBackground)
 .SpicyLyrics_PlaybarButton {
   flex-shrink: 0;
   padding: 0;
+  transition:
+    scale 0.12s ease,
+    opacity 0.12s ease;
+}
+
+/* The page takes a frame or two to mount after the route changes; without a
+   press state the button looks dead until then. */
+.SpicyLyrics_PlaybarButton:active {
+  scale: 0.94;
+  opacity: 0.78;
 }
 
 /* Spotify's own tooltip rule. Spicetify's Tippy still renders .main-contextMenu-tippy,
