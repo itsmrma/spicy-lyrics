@@ -6,6 +6,7 @@ import { Lyrics } from "./Animator/Main.ts";
 import { PageContainer } from "../../components/Pages/PageView.ts";
 import { Maid } from "../../modules/Maid.ts";
 import { onAnimationFrame } from "../AnimationFrameLoop.ts";
+import { isExperimentEnabled } from "../experiments.ts";
 
 export const ScrollingIntervalTime = Infinity;
 
@@ -175,6 +176,24 @@ const logLyric = (lyric: string) => {
   lastLyric = lyric;
 }
  */
+// The position the animator last ran at, and whether something changed that a
+// frame still has to draw. The pause guard in LyricsInterval only skips a frame
+// that nothing has changed for.
+let lastAnimatePosition: number | null = null;
+let lyricsFrameDirty = false;
+
+/** Ask for one more frame even if the player is paused and hasn't moved. */
+export function InvalidateLyricsFrame(): void {
+  lyricsFrameDirty = true;
+}
+
+// A fresh set of lyrics has to be animated once even when the clock sits on the
+// same millisecond as the last frame — a track that starts at 0:00 while paused
+// — so the guard starts over on every apply.
+Global.Event.listen("lyrics:apply", () => {
+  lastAnimatePosition = null;
+});
+
 const LyricsInterval = () => {
   /* { // Logging Line part
     const currentLyrics = storage.get("currentLyricsData") as string;
@@ -218,6 +237,20 @@ const LyricsInterval = () => {
 
   if ($lyricsContainerExists.get()) {
     const progress = SpotifyPlayer.GetPosition();
+    // Performance Mode: a paused player that hasn't moved has nothing to
+    // animate, so the frame is skipped whole. TimeSetter goes with it, since
+    // line Status only ever changes with the position and a seek, a resume or a
+    // new track moves it.
+    if (
+      isExperimentEnabled("performanceMode") &&
+      !SpotifyPlayer.IsPlaying &&
+      !lyricsFrameDirty &&
+      progress === lastAnimatePosition
+    ) {
+      return;
+    }
+    lyricsFrameDirty = false;
+    lastAnimatePosition = progress;
     Lyrics.TimeSetter(progress);
     Lyrics.Animate(progress);
   }
