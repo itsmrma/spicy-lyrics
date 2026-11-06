@@ -11,6 +11,7 @@ import { IsPIP } from "../Utils/PopupLyrics.ts";
 import { IsCompactMode } from "../Utils/CompactMode.ts";
 import { SetSideSwapTransition } from "../Utils/NowBar.ts";
 import { getBackgroundStyle, PAGE_BACKGROUND_KEY, SetKawarpSuspended } from "./dynamicBackground.ts";
+import { $windowHidden, IsWindowHidden } from "../../utils/windowActivity.ts";
 import { AttachCanvasMedia, GetPlayingCanvasInfo, LoadCanvasMedia } from "./CanvasVideo.ts";
 
 const immersiveLogger = new Logger("Canvas Immersive");
@@ -392,8 +393,11 @@ function syncPlayback() {
   if (!mount) return;
   // A minimized window keeps decoding a playing video even though none of it is drawn.
   // Reduced motion doesn't pause it: the canvas is the song's artwork, and a still frame
-  // in its place reads as a broken player.
-  const shouldPlay = active && SpotifyPlayer.IsPlaying && !mount.page.ownerDocument.hidden;
+  // in its place reads as a broken player. The page can also live in the PiP document,
+  // whose own visibility is the one that matters there.
+  const doc = mount.page.ownerDocument;
+  const hidden = doc.hidden || (doc === document && IsWindowHidden());
+  const shouldPlay = active && SpotifyPlayer.IsPlaying && !hidden;
   for (const [index, layer] of mount.layers.entries()) {
     if (!layer.fileId) continue;
     if (shouldPlay && index === mount.current) {
@@ -581,3 +585,6 @@ onExperimentChange((experiment) => {
 $backgroundStyle.listen(() => void Refresh());
 SetSideSwapTransition(transitionSideSwap);
 document.addEventListener("visibilitychange", syncPlayback);
+// Also fires for a window that is covered rather than minimized, which
+// visibilitychange doesn't report everywhere.
+$windowHidden.listen(syncPlayback);
