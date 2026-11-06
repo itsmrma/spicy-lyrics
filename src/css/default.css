@@ -1098,3 +1098,16 @@ body.SpicyLyrics_RemoveSpotifyLyricsButton .main-nowPlayingBar-extraControls > [
 #SpicyLyricsPage.Exp_PerformanceMode .ViewControls .ViewControl:hover {
   background: rgba(255, 255, 255, 0.16);
 }
+
+/* --- Window out of sight -------------------------------------------------
+   The window is minimized or fully covered by another window (windowActivity.ts
+   sets the class). Chromium stops producing frames for it, but a platform that
+   keeps compositing would still tick every keyframe, so pause them explicitly.
+   Scoped to the surfaces this extension paints, so Spotify's own UI is left
+   alone. Focus loss alone never sets the class: the lyrics must keep moving
+   while the user works next to a visible Spotify. */
+html.SpicyLyrics_WindowHidden :is(#SpicyLyricsPage, #SpicyLyricsNPVCard) *,
+html.SpicyLyrics_WindowHidden :is(#SpicyLyricsPage, #SpicyLyricsNPVCard) *::before,
+html.SpicyLyrics_WindowHidden :is(#SpicyLyricsPage, #SpicyLyricsNPVCard) *::after {
+  animation-play-state: paused !important;
+}

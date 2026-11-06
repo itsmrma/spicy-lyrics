@@ -1,4 +1,5 @@
 import { $animationFpsCap, $animationFpsCapEnabled } from "./stores.ts";
+import { $windowHidden, MarkAnimationFrame } from "./windowActivity.ts";
 
 /**
  * One requestAnimationFrame loop shared by everything that repaints every frame
@@ -104,10 +105,16 @@ const popupLoop = (timestamp: number) => {
 };
 
 const loop = (timestamp: number) => {
+  // Every frame the main window receives is proof it is still being rendered;
+  // the frame also clears a stall-detected occlusion (windowActivity.ts).
+  MarkAnimationFrame(timestamp);
   const popup = popupWindow();
   if (!popup) {
     drivingPopup = null;
-    frame(timestamp);
+    // Nobody can see a hidden or fully covered window, so skip the frame's
+    // work. The popup below keeps its own clock, since it can stay visible
+    // while the main window is behind something.
+    if (!$windowHidden.get()) frame(timestamp);
   } else if (drivingPopup !== popup) {
     drivingPopup = popup;
     popup.requestAnimationFrame(popupLoop);

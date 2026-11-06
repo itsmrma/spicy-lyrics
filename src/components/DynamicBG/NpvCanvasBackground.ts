@@ -4,6 +4,7 @@ import { isExperimentEnabled } from "../../utils/experiments.ts";
 import { onAnimationFrame } from "../../utils/AnimationFrameLoop.ts";
 import Logger from "../../utils/Logger.ts";
 import ApplyDynamicBackground, { KawarpMap } from "./dynamicBackground.ts";
+import { $windowHidden } from "../../utils/windowActivity.ts";
 
 const npvCanvasLogger = new Logger("NPV Canvas Background");
 
@@ -86,8 +87,8 @@ function optionsFor(source: HTMLVideoElement): KawarpVideoOptions {
 // background that follows it) is drawn. Only a video paused here is resumed, so a pause of
 // Spotify's own is left alone.
 let pausedWhileHidden: HTMLVideoElement | null = null;
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
+$windowHidden.listen((hidden) => {
+  if (hidden) {
     const playing = document.querySelector<HTMLVideoElement>(NPV_CANVAS_VIDEO);
     if (!playing || playing.paused) return;
     playing.pause();
