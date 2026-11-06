@@ -46,7 +46,9 @@
 }
 
 /* View-control look — the page's .ViewControl recipe restated with fixed
-   sizes (the original uses cqh units tied to the page container). */
+   sizes (the original uses cqh units tied to the page container). Hover is a
+   background change only: the scale and the layered shadows repainted the
+   whole button on every hover. */
 #SpicyLyricsNPVCard .CardControl {
   width: 38px;
   height: 38px;
@@ -61,17 +63,14 @@
   background: var(--material-regular-bg);
   -webkit-backdrop-filter: var(--material-regular-blur);
   backdrop-filter: var(--material-regular-blur);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.36),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px var(--hairline);
   transition:
-    scale 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
-    background 0.3s var(--ease-standard);
+    background 0.18s var(--ease-standard),
+    color 0.18s var(--ease-standard),
+    opacity 0.18s var(--ease-standard);
 }
 
 #SpicyLyricsNPVCard .CardControl:hover {
-  scale: 1.05;
   background: rgba(255, 255, 255, 0.12);
 }
 
@@ -311,29 +310,21 @@ body.SpicyLyrics_NPVCardExpanded
 }
 
 #SpicyLyricsNPVCard.Expanded .CardControl {
-  box-shadow:
-    0 10px 24px -8px rgba(8, 10, 18, 0.42),
-    inset 0 1px 0 rgba(255, 255, 255, 0.36),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px var(--hairline);
   transition:
-    scale 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
-    color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    background 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background 0.18s var(--ease-standard),
+    color 0.18s var(--ease-standard),
+    opacity 0.18s var(--ease-standard);
 }
 
 #SpicyLyricsNPVCard.Expanded .CardControl:hover {
-  scale: 1.015;
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
-  box-shadow:
-    0 14px 32px -8px rgba(8, 10, 18, 0.5),
-    0 0 22px -4px rgba(255, 255, 255, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.48),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.24);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
+}
+
+#SpicyLyricsNPVCard.Expanded .CardControl:active {
+  scale: 0.96;
 }
 
 #SpicyLyricsNPVCard.Expanded

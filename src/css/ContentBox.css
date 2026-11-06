@@ -2308,6 +2308,13 @@
   background: var(--SL-PerfSurface) !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
+  /* No glow, no scale: a static hairline and a background change are all the
+     hover feedback left, so nothing repaints a large shadow every frame. */
+  box-shadow: inset 0 0 0 1px var(--hairline) !important;
+  transition:
+    background 0.18s var(--ease-standard),
+    color 0.18s var(--ease-standard),
+    opacity 0.18s var(--ease-standard) !important;
 }
 
 #SpicyLyricsPage.Exp_PerformanceMode.Fullscreen
@@ -2320,6 +2327,20 @@
   .ViewControls
   .ViewControl:hover {
   background: var(--SL-PerfSurfaceHover) !important;
+  scale: 1 !important;
+  box-shadow: inset 0 0 0 1px var(--hairline-strong) !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode.Fullscreen
+  .ContentBox
+  .NowBar
+  .CenteredView
+  .Header
+  .MediaBox
+  .MediaContent
+  .ViewControls
+  .ViewControl:active {
+  scale: 0.97 !important;
 }
 
 /* Frosted progress track. The legacy skin is a plain gradient and needs nothing. */
