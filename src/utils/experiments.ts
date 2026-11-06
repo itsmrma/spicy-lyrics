@@ -158,6 +158,14 @@ export const EXPERIMENTS = [
     default: true,
     pageClass: "Exp_KeepOverlappingLines",
   },
+  {
+    id: "performanceMode",
+    label: "Performance Mode",
+    description:
+      "Drops the per-letter spring physics, glows, text-shadow blurs, distance blur on the surrounding lines and backdrop blurs, and stops the animation loop while playback is paused, for lower CPU and GPU use. Disable to bring back the full animation and blur effects.",
+    default: true,
+    pageClass: "Exp_PerformanceMode",
+  },
 ] as const satisfies readonly Experiment[];
 
 /** A registry entry, narrowed to its literal `id`. */
