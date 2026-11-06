@@ -1298,7 +1298,14 @@
 
 /* ── Performance Mode ─────────────────────────────────────────────────────────
    A line's depth is its opacity alone: no distance blur, no glow, and only
-   opacity animates between the states. */
+   opacity animates between the states.
+
+   The shadow is kept on purpose. Lyrics paint with `-webkit-text-fill-color:
+   transparent` and a background-clip gradient, so only the active line has a
+   visible fill; every other line is drawn by its text-shadow. Killing the
+   shadow here leaves just the sung line on screen. With --BlurAmount pinned to
+   zero the shadow is a crisp copy of the glyphs instead of a blurred one, so
+   the paint is cheap and the surrounding lines stay readable. */
 #SpicyLyricsPage.Exp_PerformanceMode.SpicyRenderer .LyricsContainer .LyricsContent .line,
 #SpicyLyricsPage.Exp_PerformanceMode.SpicyRenderer
   .LyricsContainer
@@ -1306,7 +1313,6 @@
   .line
   :is(.word, .letter, .letterGroup) {
   --BlurAmount: 0px !important;
-  text-shadow: none !important;
 }
 
 #SpicyLyricsPage.Exp_PerformanceMode.SpicyRenderer .LyricsContainer .LyricsContent .line {
