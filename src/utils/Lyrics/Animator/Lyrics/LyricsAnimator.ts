@@ -1063,12 +1063,15 @@ function clearPerformanceModeStyles(): void {
   };
   LyricsObject.Types.Syllable.Lines.forEach(clearLine);
   LyricsObject.Types.Line.Lines.forEach(clearLine);
-  // applyBlur only runs when the active line changes, so the next frame has to
-  // look like a change for the line blur to come back.
-  Blurring_LastLine = null;
 }
 
 $experiment("performanceMode").listen((enabled) => {
+  // applyBlur only runs when the active line changes. Dropping and restoring the
+  // distance blur are both one-shot on the toggle, so the next frame has to look
+  // like a change: without this, turning the flag off would leave every line
+  // unblurred (and the active one off its compositor layer) until the song
+  // reached the next line.
+  Blurring_LastLine = null;
   if (enabled) clearPerformanceModeStyles();
 });
 
