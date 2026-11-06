@@ -71,10 +71,32 @@
   scale: 0.94;
 }
 
+/* Only shown while the playing track ships transliterations (NPVLyrics.ts sets
+   the attribute). Stated explicitly because .CardControl's display: flex would
+   otherwise beat the user agent's [hidden] rule. */
+#SpicyLyricsNPVCard .CardControl[hidden] {
+  display: none;
+}
+
 #SpicyLyricsNPVCard .CardControl svg {
   width: 18px;
   height: 18px;
   fill: none !important;
+}
+
+/* Performance Mode: the card sits outside #SpicyLyricsPage, so the page's token
+   override never reaches it. Key off the page class the card hosts and swap the
+   glass for the same flat surface, which stays legible over artwork. `.Expanded`
+   is excluded — it is already transparent and blur-free. */
+#SpicyLyricsNPVCard:not(.Expanded):has(#SpicyLyricsPage.Exp_PerformanceMode) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: rgba(18, 18, 22, 0.72);
+}
+
+#SpicyLyricsNPVCard:has(#SpicyLyricsPage.Exp_PerformanceMode) .CardControl {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 /* The chevron turns over and the expand arrows turn inward with the card's state. Both move

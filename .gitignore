@@ -149,7 +149,9 @@ dist_legacy/
 
 src/utils/SpicyHasher.ts
 
-.github/
+# CI workflows are versioned; other .github files stay local.
+.github/*
+!.github/workflows/
 
 src/components/PopupModal/
 src/components/PopupModal/PopupModal.ts

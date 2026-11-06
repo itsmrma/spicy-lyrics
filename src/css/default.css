@@ -1086,3 +1086,15 @@ body.SpicyLyrics_RemoveSpotifyLyricsButton [data-testid="now-playing-bar"] [data
 body.SpicyLyrics_RemoveSpotifyLyricsButton .main-nowPlayingBar-extraControls > [data-testid="lyrics-button"]:not(:has(#SpicyLyricsPageSvg)) {
   display: none !important;
 }
+
+/* Performance Mode: the view controls are the only frosted surface this file
+   paints inside the page. Flat dark plate in place of the blur. */
+#SpicyLyricsPage.Exp_PerformanceMode .ViewControls .ViewControl {
+  background: var(--SL-PerfSurface, rgba(18, 18, 22, 0.72));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode .ViewControls .ViewControl:hover {
+  background: rgba(255, 255, 255, 0.16);
+}

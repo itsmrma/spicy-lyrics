@@ -13,18 +13,26 @@ import Global from "../Global/Global.ts";
 import { Icons } from "../Styling/Icons.ts";
 import { Maid } from "../../modules/Maid.ts";
 import Whentil from "../../modules/Whentil.ts";
-import { $npvLyricsExpanded, $npvLyricsOpen } from "../../utils/uiState.ts";
+import {
+  $npvLyricsExpanded,
+  $npvLyricsOpen,
+  $romanization,
+} from "../../utils/uiState.ts";
 import {
   $currentLyricsData,
   $disableNpvLyrics,
   $hideNpvLyricsWhenUnavailable,
 } from "../../utils/stores.ts";
 import { SpotifyPlayer } from "../Global/SpotifyPlayer.ts";
+import { isRomanized, setRomanizedStatus } from "../../utils/Lyrics/lyrics.ts";
+import ApplyLyrics from "../../utils/Lyrics/Global/Applyer.ts";
 import Logger from "../../utils/Logger.ts";
 
 const cardLogger = new Logger("NPV Lyrics");
 
 type CardState = "DORMANT" | "SHELL" | "ACTIVE";
+
+type LyricsPayload = { uri?: string; HasTransliterations?: boolean };
 
 let initialized = false;
 let cardEl: HTMLElement | null = null;
@@ -138,6 +146,9 @@ async function teardownCard(): Promise<void> {
   cardBodyEl = null;
   lastToggleOpen = null;
   lastExpanded = null;
+  lastRomanization = null;
+  lastRomanizationAvailable = null;
+  availabilityCache = null;
 }
 
 // The expanded body class hides the NPV's other content, so it must not outlive
@@ -237,6 +248,95 @@ function setTooltip(target: Element, content: string, maidKey: string): void {
 
 let lastToggleOpen: boolean | null = null;
 let lastExpanded: boolean | null = null;
+// What the romanization control currently shows, so refreshCardUI only rewrites
+// the button (and rebuilds its tooltip) when something actually moved.
+let lastRomanization: boolean | null = null;
+let lastRomanizationAvailable: boolean | null = null;
+
+// The applied payload, cached so the flag isn't re-parsed on every refresh.
+let availabilityCache: {
+  data: string;
+  uri: string | null;
+  available: boolean;
+} | null = null;
+
+function parseLyricsPayload(data: string): LyricsPayload | null {
+  try {
+    return JSON.parse(data) as LyricsPayload;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the playing track's lyrics carry transliterations.
+ *
+ * `$currentLyricsData` holds the payload the pipeline applied, but it keeps the
+ * previous song's lyrics until the new apply lands, so its flag only counts
+ * once the payload's uri matches the track that's playing now.
+ */
+function romanizationAvailable(): boolean {
+  const data = $currentLyricsData.get();
+  const uri = SpotifyPlayer.GetUri();
+  if (
+    availabilityCache &&
+    availabilityCache.data === data &&
+    availabilityCache.uri === uri
+  ) {
+    return availabilityCache.available;
+  }
+  let available = false;
+  if (data && uri && !data.startsWith("NO_LYRICS:")) {
+    const payload = parseLyricsPayload(data);
+    available = payload?.uri === uri && payload?.HasTransliterations === true;
+  }
+  availabilityCache = { data, uri, available };
+  return available;
+}
+
+/**
+ * Re-run the card's own lyrics from the payload it was applied with. The
+ * appliers pick each line's text with PickDisplayText, so the same payload
+ * renders romanized without a refetch or a reopen. Nothing is re-applied while
+ * the card is collapsed: the next open reads the flag and applies romanized.
+ */
+async function reapplyCardLyrics(): Promise<void> {
+  if (!cardOwnsPage || !PageContainer) return;
+  const uri = SpotifyPlayer.GetUri();
+  const data = $currentLyricsData.get();
+  if (!uri || !data || data.startsWith("NO_LYRICS:")) return;
+  const payload = parseLyricsPayload(data);
+  if (!payload || payload.uri !== uri) return;
+  await ApplyLyrics([payload, 200, uri]);
+}
+
+function refreshRomanizationControl(): void {
+  if (!cardEl) return;
+  const button = cardEl.querySelector<HTMLElement>("#NPVCardRomanization");
+  if (!button) return;
+  const available = romanizationAvailable();
+  if (available !== lastRomanizationAvailable) {
+    lastRomanizationAvailable = available;
+    button.hidden = !available;
+  }
+  if (!available) return;
+  const enabled = isRomanized;
+  if (enabled === lastRomanization) return;
+  lastRomanization = enabled;
+  button.innerHTML = enabled
+    ? Icons.DisableRomanization
+    : Icons.EnableRomanization;
+  button.setAttribute("aria-pressed", String(enabled));
+  button.setAttribute(
+    "aria-label",
+    enabled ? "Disable Romanization" : "Enable Romanization"
+  );
+  setTooltip(
+    button,
+    enabled ? "Disable Romanization" : "Enable Romanization",
+    "romanization-tip"
+  );
+}
 
 const STATE_ANIM_MS = 350;
 const STATE_ANIM_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
@@ -417,6 +517,7 @@ function refreshCardUI(): void {
       );
     }
   }
+  refreshRomanizationControl();
 }
 
 // The card's ancestors, marked for expanded mode, which hides everything beside
@@ -449,6 +550,7 @@ function renderCardShell(npv: HTMLElement): boolean {
             <div class="CardControls">
                 <button id="NPVCardExpand" class="CardControl">${Icons.OpenPage}</button>
                 <button id="NPVCardMaximize" class="CardControl">${Icons.CardExpand}</button>
+                <button id="NPVCardRomanization" class="CardControl" hidden>${Icons.EnableRomanization}</button>
                 <button id="NPVCardToggle" class="CardControl">${Icons.CardToggle}</button>
             </div>
         </div>
@@ -464,6 +566,10 @@ function renderCardShell(npv: HTMLElement): boolean {
     stretchHosts = [];
   });
   cardBodyEl = cardEl.querySelector<HTMLElement>(".CardBody");
+
+  // The main page's toggle writes the same store, so the card's button follows
+  // it from either side. Unsubscribed with the card.
+  cardMaid.Give($romanization.listen(() => refreshRomanizationControl()));
 
   const expand = cardEl.querySelector<HTMLElement>("#NPVCardExpand");
   if (expand) {
@@ -484,6 +590,16 @@ function renderCardShell(npv: HTMLElement): boolean {
         if (next && !$npvLyricsOpen.get()) $npvLyricsOpen.set(true);
         refreshCardUI();
       });
+    });
+  }
+
+  const romanization = cardEl.querySelector<HTMLElement>("#NPVCardRomanization");
+  if (romanization) {
+    romanization.addEventListener("click", () => {
+      // The same setter the main page uses: it moves both the module flag the
+      // appliers read and the persisted store, so the two toggles never drift.
+      setRomanizedStatus(!isRomanized);
+      void reapplyCardLyrics();
     });
   }
 

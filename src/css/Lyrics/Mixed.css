@@ -1295,3 +1295,44 @@
   scale: 1.05;
   backdrop-filter: blur(2px);
 }
+
+/* ── Performance Mode ─────────────────────────────────────────────────────────
+   A line's depth is its opacity alone: no distance blur, no glow, and only
+   opacity animates between the states. */
+#SpicyLyricsPage.Exp_PerformanceMode.SpicyRenderer .LyricsContainer .LyricsContent .line,
+#SpicyLyricsPage.Exp_PerformanceMode.SpicyRenderer
+  .LyricsContainer
+  .LyricsContent
+  .line
+  :is(.word, .letter, .letterGroup) {
+  --BlurAmount: 0px !important;
+  text-shadow: none !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode.SpicyRenderer .LyricsContainer .LyricsContent .line {
+  --Vocal-NotSung-opacity: 0.55;
+  --Vocal-Sung-opacity: 0.35;
+  transition: opacity 0.2s ease !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode.SpicyRenderer .LyricsContainer .LyricsContent .line.Active {
+  opacity: 1;
+}
+
+/* Line hover plate: the wash stays, the blur it used to gain on hover does not. */
+#SpicyLyricsPage.Exp_PerformanceMode.SpicyRenderer:not(.NoLineHoverBackground)
+  .LyricsContainer
+  .LyricsContent
+  .SpicyLyricsScrollContainer:not([data-lyrics-type="Static"])
+  .line:not(.musical-line)::before {
+  transition: opacity 0.2s ease, scale 0.2s ease;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode.SpicyRenderer:not(.NoLineHoverBackground)
+  .LyricsContainer
+  .LyricsContent
+  .SpicyLyricsScrollContainer:not([data-lyrics-type="Static"])
+  .line:hover::before {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
