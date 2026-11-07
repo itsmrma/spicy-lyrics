@@ -45,9 +45,66 @@ type Group = {
   romaji: string;
   /** Whether the group belongs to a token that contains kanji. */
   fromKanjiToken: boolean;
+  /** Underlying Kuromoji token for grammatical part-of-speech attachment */
+  token: any;
 };
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Checks whether the current token attaches directly to the previous token without a space.
+ */
+function shouldAttach(prevToken: any, currToken: any): boolean {
+  if (!prevToken || !currToken) return false;
+
+  // Symbols / Punctuation
+  if (currToken.pos === "記号") {
+    const openBrackets = ["（", "「", "『", "(", "[", "{", "“", "‘"];
+    if (openBrackets.includes(currToken.surface_form)) return false;
+    return true; // attach closing brackets, commas, periods, exclamation, etc.
+  }
+  if (prevToken.pos === "記号") {
+    const openBrackets = ["（", "「", "『", "(", "[", "{", "“", "‘"];
+    if (openBrackets.includes(prevToken.surface_form)) return true;
+  }
+
+  // Suffixes attach to previous word (e.g. 達, 等, 様, さん, くん, ちゃん, さ)
+  if (currToken.pos_detail_1 === "接尾") return true;
+  // Prefixes attach to next word (e.g. お-, ご-)
+  if (prevToken.pos === "接頭詞") return true;
+
+  // Contracted auxiliary verbs / subsidiary verbs like てる, ちゃう, とく
+  if (currToken.pos === "動詞" && currToken.pos_detail_1 === "非自立") {
+    if (prevToken.pos === "動詞" && /^[てでちゃじゃと]/.test(currToken.surface_form)) {
+      return true;
+    }
+  }
+
+  // Conjunctive particle て/で attaching to verb/adjective
+  if (
+    currToken.pos === "助詞" &&
+    currToken.pos_detail_1 === "接続助詞" &&
+    ["て", "で"].includes(currToken.surface_form)
+  ) {
+    if (prevToken.pos === "動詞" || prevToken.pos === "形容詞") return true;
+  }
+
+  // Auxiliary verbs (助動詞)
+  if (currToken.pos === "助動詞") {
+    if (prevToken.pos === "助動詞") return true;
+    if (prevToken.pos === "動詞" || prevToken.pos === "形容詞") {
+      const inflections = [
+        "た", "だ", "ない", "なかっ", "ます", "まし", "ませ",
+        "たい", "たかっ", "れる", "られ", "せる", "させ", "う", "よう", "ず"
+      ];
+      if (inflections.includes(currToken.surface_form)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
 
 /**
  * Split one token into the runs a syllable boundary can fall between. A token
@@ -61,7 +118,7 @@ function tokenGroups(token: any, base: string, fromKanjiToken: boolean): Group[]
   const reading: string = token.reading || surface;
 
   if (!HAN.test(surface)) {
-    return [{ surface, reading, romaji: kanaToRomaji(base), fromKanjiToken }];
+    return [{ surface, reading, romaji: kanaToRomaji(base), fromKanjiToken, token }];
   }
 
   const runs: { kanji: boolean; surface: string }[] = [];
@@ -98,7 +155,7 @@ function tokenGroups(token: any, base: string, fromKanjiToken: boolean): Group[]
   // cut per run; the whole token still converts, just without internal splits.
   const match = new RegExp(`^${pattern}$`).exec(toRawHiragana(reading));
   if (!match || reading.length !== base.length) {
-    return [{ surface, reading, romaji: kanaToRomaji(base), fromKanjiToken: true }];
+    return [{ surface, reading, romaji: kanaToRomaji(base), fromKanjiToken: true, token }];
   }
 
   const groups: Group[] = [];
@@ -114,11 +171,12 @@ function tokenGroups(token: any, base: string, fromKanjiToken: boolean): Group[]
       reading: read,
       romaji: kanaToRomaji(spoken),
       fromKanjiToken: true,
+      token,
     });
   }
 
   if (offset !== reading.length) {
-    return [{ surface, reading, romaji: kanaToRomaji(base), fromKanjiToken: true }];
+    return [{ surface, reading, romaji: kanaToRomaji(base), fromKanjiToken: true, token }];
   }
   return groups;
 }
@@ -167,13 +225,24 @@ function groupLine(tokens: any[], ranges: readonly [number, number][]): Group[] 
       if (rangeStart < end && rangeEnd > start) touched += 1;
     }
 
-    // A token spanning syllables is read from its kana reading rather than its
-    // pronunciation: each syllable then shows plain kana romanization ("kou")
-    // instead of half a macron ("k" + "ō").
-    const base =
-      touched > 1
-        ? token.reading || token.surface_form
-        : token.pronunciation || token.reading || token.surface_form;
+    let base: string;
+    if (token.pos === "助詞") {
+      if (token.surface_form === "は") base = "ワ";
+      else if (token.surface_form === "へ") base = "エ";
+      else if (token.surface_form === "を") base = "オ";
+      else base = token.pronunciation || token.reading || token.surface_form;
+    } else if (token.surface_form === "こんにちは" || token.surface_form === "今日は") {
+      base = "コンニチワ";
+    } else if (token.surface_form === "こんばんは" || token.surface_form === "今晩は") {
+      base = "コンバンワ";
+    } else if (touched > 1) {
+      // A token spanning syllables is read from its kana reading rather than its
+      // pronunciation: each syllable then shows plain kana romanization ("kou")
+      // instead of half a macron ("k" + "ō").
+      base = token.reading || token.surface_form;
+    } else {
+      base = token.pronunciation || token.reading || token.surface_form;
+    }
 
     groups.push(...tokenGroups(token, base, HAN.test(token.surface_form)));
   }
@@ -181,13 +250,22 @@ function groupLine(tokens: any[], ranges: readonly [number, number][]): Group[] 
   return groups;
 }
 
+export type JapaneseSyllableResult = {
+  text: string;
+  isPartOfWord?: boolean;
+};
+
 /** Hand each range the slice of its groups' romaji it covers. */
-function distribute(groups: readonly Group[], ranges: readonly [number, number][]): string[] {
+function distribute(
+  groups: readonly Group[],
+  ranges: readonly [number, number][]
+): JapaneseSyllableResult[] {
   let groupIndex = 0;
   let groupStart = 0;
 
-  return ranges.map(([start, end]) => {
+  return ranges.map(([start, end], rangeIdx) => {
     let result = "";
+    let lastGroup: Group | null = null;
 
     while (groupIndex < groups.length && groupStart + groups[groupIndex].surface.length <= start) {
       groupStart += groups[groupIndex].surface.length;
@@ -196,6 +274,9 @@ function distribute(groups: readonly Group[], ranges: readonly [number, number][
 
     let index = groupIndex;
     let cursor = groupStart;
+    let endsInsideGroup = false;
+    let endingGroupIndex = -1;
+
     while (index < groups.length && cursor < end) {
       const group = groups[index];
       const groupEnd = cursor + group.surface.length;
@@ -203,27 +284,61 @@ function distribute(groups: readonly Group[], ranges: readonly [number, number][
       const to = Math.min(end, groupEnd) - cursor;
 
       if (to > from) {
+        let piece = "";
         if (from === 0 && to === group.surface.length) {
-          result += group.romaji;
+          piece = group.romaji;
         } else if (group.fromKanjiToken) {
           // A split inside a kanji run has no reading boundary to cut at; keep
           // the romaji proportional to the characters on each side.
           const romajiFrom = Math.floor((group.romaji.length * from) / group.surface.length);
           const romajiTo = Math.floor((group.romaji.length * to) / group.surface.length);
-          result += group.romaji.slice(romajiFrom, romajiTo);
+          piece = group.romaji.slice(romajiFrom, romajiTo);
         } else {
           // Kana can be cut at the syllable boundary and converted on its own.
           const readingFrom = Math.floor((group.reading.length * from) / group.surface.length);
           const readingTo = Math.floor((group.reading.length * to) / group.surface.length);
-          result += kanaToRomaji(group.reading.slice(readingFrom, readingTo));
+          piece = kanaToRomaji(group.reading.slice(readingFrom, readingTo));
         }
+
+        if (lastGroup && lastGroup.token !== group.token && !shouldAttach(lastGroup.token, group.token)) {
+          if (result.length > 0 && !result.endsWith(" ") && !piece.startsWith(" ")) {
+            result += " ";
+          }
+        }
+        result += piece;
+        lastGroup = group;
       }
+
+      if (end < groupEnd) {
+        endsInsideGroup = true;
+      }
+      endingGroupIndex = index;
 
       cursor = groupEnd;
       index += 1;
     }
 
-    return cleanRomaji(result);
+    // Determine whether this syllable range continues into the next range as part of the same word
+    let isPartOfWord = false;
+    if (rangeIdx < ranges.length - 1) {
+      if (endsInsideGroup) {
+        isPartOfWord = true;
+      } else if (endingGroupIndex >= 0 && endingGroupIndex + 1 < groups.length) {
+        const nextGroup = groups[endingGroupIndex + 1];
+        isPartOfWord =
+          groups[endingGroupIndex].token === nextGroup.token ||
+          shouldAttach(groups[endingGroupIndex].token, nextGroup.token);
+      }
+    }
+
+    const cleaned = cleanRomaji(result)
+      .replace(/\s+([、。，．,\.!?！？])/g, "$1")
+      .replace(/ +/g, " ");
+
+    return {
+      text: cleaned,
+      isPartOfWord,
+    };
   });
 }
 
@@ -247,12 +362,13 @@ function cleanRomaji(text: string): string {
 }
 
 /** Per-text fallback for the rare line the token stream can't be aligned to. */
-async function romanizeEach(texts: readonly string[]): Promise<string[]> {
-  return Promise.all(
+async function romanizeEach(texts: readonly string[]): Promise<JapaneseSyllableResult[]> {
+  const list = await Promise.all(
     texts.map(async (text) =>
       cleanRomaji(await converter.convert(text, { to: "romaji", mode: "normal" }))
     )
   );
+  return list.map((text) => ({ text, isPartOfWord: false }));
 }
 
 /**
@@ -262,11 +378,13 @@ async function romanizeEach(texts: readonly string[]): Promise<string[]> {
  * are fine: they stay in the line so the tokenizer sees the whole sentence, and
  * their slice comes back as the matching punctuation.
  */
-export async function RomanizeJapaneseSyllables(texts: readonly string[]): Promise<string[]> {
+export async function RomanizeJapaneseSyllables(
+  texts: readonly string[]
+): Promise<JapaneseSyllableResult[]> {
   const normalized = texts.map((text) => text.normalize("NFKC"));
   const { line, ranges } = buildLine(normalized);
 
-  if (line.trim() === "") return normalized.slice();
+  if (line.trim() === "") return normalized.map((text) => ({ text, isPartOfWord: false }));
 
   await JapaneseRomanizerReady;
 

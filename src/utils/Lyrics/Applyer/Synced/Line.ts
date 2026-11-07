@@ -26,6 +26,7 @@ import { initLyricsVirtualizer } from "../../LyricsVirtualizer.ts";
 import { ApplySongCredits, MarkLastLineSide } from "../Credits/ApplyLyricsCredits.ts";
 import { EmitApply, EmitNotApplyed } from "../OnApply.ts";
 import { RemoveEmptyLyricsLines } from "../../EmptyLines.ts";
+import { isExperimentEnabled } from "../../../experiments.ts";
 
 // Define the data structure for lyrics
 interface LyricsLineData {
@@ -34,6 +35,7 @@ interface LyricsLineData {
   EndTime: number;
   TransliteratedText?: string;
   OppositeAligned?: boolean;
+  Singer?: string;
 }
 
 interface LyricsData {
@@ -181,9 +183,48 @@ export function ApplyLineLyrics(data: LyricsData, UseRomanized: boolean = false)
 
   content.forEach((line, index, arr) => {
     const lineElem = document.createElement("div");
-    lineElem.textContent = StripZeroWidth(
-      PickDisplayText(line, UseRomanized)
-    );
+    const showDual =
+      isExperimentEnabled("dualLineRomanization") &&
+      UseRomanized &&
+      !!line.TransliteratedText &&
+      !!line.Text &&
+      line.Text !== line.TransliteratedText;
+
+    const showSinger =
+      isExperimentEnabled("geniusSingerAttribution") && !!line.Singer;
+
+    if (showDual || showSinger) {
+      const headerElem = document.createElement("div");
+      headerElem.classList.add("LineHeader");
+
+      if (showSinger && line.Singer) {
+        const singerElem = document.createElement("span");
+        singerElem.classList.add("SingerBadge");
+        singerElem.textContent = line.Singer;
+        headerElem.appendChild(singerElem);
+      }
+
+      if (showDual && line.Text) {
+        const origElem = document.createElement("span");
+        origElem.classList.add("OriginalScript");
+        origElem.textContent = StripZeroWidth(line.Text);
+        headerElem.appendChild(origElem);
+      }
+
+      lineElem.appendChild(headerElem);
+
+      const mainTextElem = document.createElement("span");
+      mainTextElem.classList.add("MainText");
+      mainTextElem.textContent = StripZeroWidth(
+        PickDisplayText(line, UseRomanized)
+      );
+      lineElem.appendChild(mainTextElem);
+      lineElem.classList.add("DualLine");
+    } else {
+      lineElem.textContent = StripZeroWidth(
+        PickDisplayText(line, UseRomanized)
+      );
+    }
     lineElem.classList.add("line");
 
     if (isRtl(line.Text) && !lineElem.classList.contains("rtl")) {

@@ -175,6 +175,30 @@ aside:has(.spicy-dynamic-bg) .iHa_q9pq4un3VNRQgwTx {
     blur(var(--BackgroundImageBlur, 0px));
 }
 
+/* Blurred cover art and artist backgrounds */
+#SpicyLyricsPage .spicy-dynamic-bg.StaticBackground.BlurredBackground {
+  filter: none !important;
+  scale: 1 !important;
+}
+
+#SpicyLyricsPage .spicy-dynamic-bg.StaticBackground.BlurredBackground::before {
+  content: "";
+  position: absolute;
+  inset: -60px;
+  background: var(--BackgroundImage) center / cover no-repeat;
+  filter: brightness(0.55) contrast(1.05) saturate(1.7)
+    blur(var(--BackgroundImageBlur, 64px));
+  will-change: filter;
+  transform: translate3d(0, 0, 0);
+}
+
+#SpicyLyricsPage.Exp_RefinedBackground .spicy-dynamic-bg.StaticBackground.BlurredBackground::before {
+  inset: calc(var(--BackgroundImageBlur, 64px) * -1.5);
+  background: var(--BackgroundImage) center / cover no-repeat;
+  filter: brightness(0.55) contrast(1.05) saturate(1.7)
+    blur(var(--BackgroundImageBlur, 64px));
+}
+
 /* Refined layer changes: a new layer fades in over the old one, which holds still
    underneath until it's removed, so the picture never dips through black. The slight
    settle in scale reads as the image arriving rather than a plain dissolve. */

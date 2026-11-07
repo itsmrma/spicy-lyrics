@@ -834,9 +834,17 @@
   fill: var(--accent);
 }
 
-/* --accent is often white here, which left an enabled shuffle or repeat looking exactly like a
-   disabled one; the glow is what tells them apart. Two stacked shadows: a tight one that traces the
-   glyph and a wide, faint halo. The svg's filter transition fades it in and out. */
+/* Enabled shuffle and repeat controls: no glow, discrete dot indicator centered underneath. */
+#SpicyLyricsPage.Fullscreen
+  .ContentBox
+  .NowBar
+  .CenteredView
+  .Header
+  .PlaybackControls
+  .PlaybackControl:is(.ShuffleToggle, .LoopToggle) {
+  position: relative;
+}
+
 #SpicyLyricsPage.Fullscreen
   .ContentBox
   .NowBar
@@ -845,7 +853,26 @@
   .PlaybackControls
   .PlaybackControl:is(.ShuffleToggle, .LoopToggle).Enabled
   > svg {
-  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.5)) drop-shadow(0 0 6px rgba(255, 255, 255, 0.28));
+  filter: none !important;
+}
+
+#SpicyLyricsPage.Fullscreen
+  .ContentBox
+  .NowBar
+  .CenteredView
+  .Header
+  .PlaybackControls
+  .PlaybackControl:is(.ShuffleToggle, .LoopToggle).Enabled::after {
+  content: "";
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--accent, #fff);
+  pointer-events: none;
 }
 
 @keyframes pressAnimation {
@@ -2375,4 +2402,42 @@
    nothing left to paint, so it skips the layer entirely. */
 #SpicyLyricsPage.Exp_PerformanceMode .MediaImageContainer .fi_FromImage::before {
   display: none;
+}
+
+/* Performance Mode: now playing bar buttons should have no heavy bouncing spring animations.
+   Lightweight, snappy, ultra-fast transitions only. */
+#SpicyLyricsPage.Exp_PerformanceMode .PlaybackControls .PlaybackControl:not(.Pressed) {
+  animation: none !important;
+  transform: none;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode .PlaybackControls .PlaybackControl {
+  transition: opacity 0.08s ease-out, transform 0.06s ease-out !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode .PlaybackControls .PlaybackControl.Pressed {
+  transform: scale(0.96) !important;
+  transition: transform 0.05s ease-out, opacity 0.05s ease-out !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode .PlaybackControls .PlaybackControl svg {
+  transition: none !important;
+  filter: none !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode .ContentBox .NowBar .Header .MediaBox .Heart {
+  transition: opacity 0.08s ease-out !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode .ContentBox .NowBar .Header .MediaBox .Heart svg {
+  transition: scale 0.06s ease-out !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode .ContentBox .NowBar .Header .MediaBox .Heart:hover svg {
+  scale: 1 !important;
+}
+
+#SpicyLyricsPage.Exp_PerformanceMode .ContentBox .NowBar .Header .MediaBox .Heart:is(.press02, .reverse_press02) svg {
+  scale: 0.95 !important;
+  transition: scale 0.05s ease-out !important;
 }

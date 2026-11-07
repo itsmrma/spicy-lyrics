@@ -1185,10 +1185,12 @@ async function main() {
       if (Fullscreen.IsOpen) {
         if (!Fullscreen.CinemaViewOpen) {
           Fullscreen.CinemaViewOpen = true;
+          PageContainer?.classList.add("CinemaView");
           await ExitFullscreenElement();
           PageView.AppendViewControls(true);
         } else {
           Fullscreen.CinemaViewOpen = false;
+          PageContainer?.classList.remove("CinemaView");
           await EnterSpicyLyricsFullscreen();
           PageView.AppendViewControls(true);
         }
@@ -1199,6 +1201,7 @@ async function main() {
   document.addEventListener("fullscreenchange", async () => {
     if (!document.fullscreenElement && Fullscreen.IsOpen && !Fullscreen.CinemaViewOpen) {
       Fullscreen.CinemaViewOpen = true;
+      PageContainer?.classList.add("CinemaView");
       await ExitFullscreenElement();
       PageView.AppendViewControls(true);
     }

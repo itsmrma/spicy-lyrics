@@ -13,8 +13,10 @@ import type { GroupDef, SectionDef } from "./model.ts";
 
 export const BACKGROUND_STYLE_LABELS: Record<BackgroundStyle, string> = {
   dynamic: "Dynamic (Kawarp)",
-  artist: "Artist Image",
+  "cover-blur": "Cover Art (Blurred)",
   cover: "Cover Art",
+  "artist-blur": "Artist Image (Blurred)",
+  artist: "Artist Image",
   color: "Cover Colors",
   none: "None (Transparent)",
 };
@@ -28,9 +30,13 @@ const groups: GroupDef[] = [
         id: "backgroundStyle",
         label: "Background",
         description:
-          "Dynamic (Kawarp) swirls the cover art in time with the music. Artist Image uses the artist's header photo, or the cover when there isn't one. None (Transparent) leaves the page see-through, so whatever is behind it shows.",
-        keywords: "static animated kawarp artist header cover art color colors image transparent none theme",
+          "Dynamic (Kawarp) swirls the cover art in time with the music. Cover Art (Blurred) blurs the album cover across the whole view. Artist Image uses the artist's header photo. None (Transparent) leaves the page see-through.",
+        keywords: "static animated kawarp artist header cover art blur color colors image transparent none theme",
         useNote: () => {
+          const isPerf = useStore($experiment("performanceMode"));
+          if (isPerf) {
+            return "Dynamic (Kawarp) is disabled while Performance Mode is active.";
+          }
           const style = useStore($backgroundStyle);
           const canvasStage = useStore($experiment("canvasImmersive"));
           return (
@@ -39,15 +45,25 @@ const groups: GroupDef[] = [
             `${getExperiment("canvasImmersive").label} only plays over Dynamic (Kawarp), so it won't show with ${BACKGROUND_STYLE_LABELS[style] ?? "this background"}.`
           );
         },
-        Control: ({ label }) => (
-          <Select
-            label={label}
-            value={useStore($backgroundStyle)}
-            options={[...BACKGROUND_STYLES]}
-            labels={BACKGROUND_STYLES.map((style) => BACKGROUND_STYLE_LABELS[style])}
-            onChange={(v) => $backgroundStyle.set(v as BackgroundStyle)}
-          />
-        ),
+        Control: ({ label }) => {
+          const isPerf = useStore($experiment("performanceMode"));
+          const currentStyle = useStore($backgroundStyle);
+          const availableStyles = isPerf
+            ? BACKGROUND_STYLES.filter((s) => s !== "dynamic")
+            : [...BACKGROUND_STYLES];
+          return (
+            <Select
+              label={label}
+              value={isPerf && currentStyle === "dynamic" ? "cover-blur" : currentStyle}
+              options={availableStyles}
+              labels={availableStyles.map((style) => BACKGROUND_STYLE_LABELS[style])}
+              onChange={(v) => {
+                if (isPerf && v === "dynamic") return;
+                $backgroundStyle.set(v as BackgroundStyle);
+              }}
+            />
+          );
+        },
       },
       {
         id: "backgroundBlur",
@@ -57,16 +73,21 @@ const groups: GroupDef[] = [
         stacked: true,
         useDisabled: () => {
           const style = useStore($backgroundStyle);
-          return style !== "artist" && style !== "cover" && "Only applies to Artist Image and Cover Art.";
+          const isImage =
+            style === "artist" ||
+            style === "artist-blur" ||
+            style === "cover" ||
+            style === "cover-blur";
+          return !isImage && "Only applies to Artist Image and Cover Art backgrounds.";
         },
         Control: ({ disabled, label }) => (
           <Slider
             label={label}
             value={useStore($backgroundBlur)}
             min={0}
-            max={48}
+            max={120}
             step={1}
-            defaultValue={0}
+            defaultValue={64}
             unit="px"
             onChange={(v) => $backgroundBlur.set(v)}
             disabled={disabled}
@@ -83,13 +104,25 @@ const groups: GroupDef[] = [
         label: "Animated Background",
         description: "Show the Dynamic (Kawarp) background behind the Now Playing sidebar.",
         keywords: "dynamic background npv now playing view kawarp",
-        Control: ({ label }) => (
-          <Toggle
-            label={label}
-            checked={useStore($showNpvDynamicBg)}
-            onChange={(v) => $showNpvDynamicBg.set(v)}
-          />
-        ),
+        useDisabled: () => {
+          const isPerf = useStore($experiment("performanceMode"));
+          return isPerf ? "Disabled in Performance Mode to reduce resource usage." : undefined;
+        },
+        Control: ({ disabled, label }) => {
+          const isPerf = useStore($experiment("performanceMode"));
+          return (
+            <Toggle
+              label={label}
+              disabled={disabled}
+              locked={isPerf}
+              checked={isPerf ? false : useStore($showNpvDynamicBg)}
+              onChange={(v) => {
+                if (isPerf) return;
+                $showNpvDynamicBg.set(v);
+              }}
+            />
+          );
+        },
       },
     ],
   },

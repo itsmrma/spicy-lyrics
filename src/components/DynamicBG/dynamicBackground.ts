@@ -1,10 +1,12 @@
 import {
   $backgroundBlur,
   $backgroundStyle,
+  $showNpvDynamicBg,
+  $simpleLyricsMode,
   BACKGROUND_STYLES,
   type BackgroundStyle,
 } from "../../utils/stores.ts";
-import { isExperimentEnabled } from "../../utils/experiments.ts";
+import { $experiment, isExperimentEnabled } from "../../utils/experiments.ts";
 import BlobURLMaker from "../../utils/BlobURLMaker.ts";
 import Global from "../Global/Global.ts";
 import { COVER_PLACEHOLDER_URL, SpotifyPlayer } from "../Global/SpotifyPlayer.ts";
@@ -42,8 +44,12 @@ const animSpeedController = new BackgroundAnimationController();
 const isRefined = () => isExperimentEnabled("refinedBackground");
 
 export function getBackgroundStyle(): BackgroundStyle {
+  const isPerf = isExperimentEnabled("performanceMode");
   const style = $backgroundStyle.get();
-  return BACKGROUND_STYLES.includes(style) ? style : "dynamic";
+  if (isPerf && style === "dynamic") {
+    return "cover-blur";
+  }
+  return BACKGROUND_STYLES.includes(style) ? style : isPerf ? "cover-blur" : "dynamic";
 }
 
 // Kawarp's own start() runs an uncapped requestAnimationFrame loop. We render the
@@ -66,6 +72,7 @@ function playKawarp(kawarp: Kawarp) {
 }
 
 function startKawarp(kawarp: Kawarp) {
+  if (isExperimentEnabled("performanceMode")) return;
   if (runningKawarps.has(kawarp)) return;
   playKawarp(kawarp);
   runningKawarps.add(kawarp);
@@ -92,6 +99,7 @@ export function SetKawarpSuspended(key: HTMLElement | string, suspended: boolean
 }
 
 onAnimationFrame(() => {
+  if (isExperimentEnabled("performanceMode")) return;
   if (KawarpMap.size === 0) return;
   KawarpMap.forEach((kawarp, key) => {
     if (runningKawarps.has(kawarp) && !suspendedKawarpKeys.has(key)) kawarp.renderFrame();
@@ -407,7 +415,16 @@ export default async function ApplyDynamicBackground(host: HTMLElement, key: str
   // Nothing to paint, and a fetch of "" would load the app page itself.
   if (!track.coverUri) return;
   if (style === "color") return applyColorBackground(host, track);
-  if (style === "artist" || style === "cover") return applyImageBackground(host, track, style);
+  if (
+    style === "artist" ||
+    style === "artist-blur" ||
+    style === "cover" ||
+    style === "cover-blur"
+  )
+    return applyImageBackground(host, track, style);
+  if (isExperimentEnabled("performanceMode")) {
+    return applyImageBackground(host, track, "cover-blur");
+  }
   return applyKawarpBackground(host, key, track);
 }
 
@@ -497,8 +514,12 @@ async function applyKawarpBackground(host: HTMLElement, key: string, track: Trac
 }
 
 /** The artist's header image when `style` asks for it, else the cover. */
-async function resolveBackgroundImage(track: TrackSnapshot, style: "artist" | "cover"): Promise<string> {
-  if (style === "cover" || !track.artistId || !track.trackId) return track.coverUri;
+async function resolveBackgroundImage(
+  track: TrackSnapshot,
+  style: "artist" | "artist-blur" | "cover" | "cover-blur"
+): Promise<string> {
+  if (style === "cover" || style === "cover-blur" || !track.artistId || !track.trackId)
+    return track.coverUri;
   try {
     return (await ArtistVisuals.ApplyContent(track.artistId, track.trackId)) || track.coverUri;
   } catch (error) {
@@ -509,7 +530,12 @@ async function resolveBackgroundImage(track: TrackSnapshot, style: "artist" | "c
 
 /** Fetch the playing artist's image ahead of time, so the Artist Image style paints without waiting on it. */
 export async function PrefetchArtistImage(): Promise<void> {
-  if (getBackgroundStyle() !== "artist" || SpotifyPlayer.IsDJ()) return;
+  const currentStyle = getBackgroundStyle();
+  if (
+    (currentStyle !== "artist" && currentStyle !== "artist-blur") ||
+    SpotifyPlayer.IsDJ()
+  )
+    return;
   const artistId = SpotifyPlayer.GetArtists()?.[0]?.uri?.replace("spotify:artist:", "");
   const trackId = SpotifyPlayer.GetId();
   if (!artistId || !trackId) return;
@@ -518,13 +544,23 @@ export async function PrefetchArtistImage(): Promise<void> {
   );
 }
 
-async function applyImageBackground(host: HTMLElement, track: TrackSnapshot, style: "artist" | "cover") {
+async function applyImageBackground(
+  host: HTMLElement,
+  track: TrackSnapshot,
+  style: "artist" | "artist-blur" | "cover" | "cover-blur"
+) {
   const imageUri = await resolveBackgroundImage(track, style);
   if (!imageUri || track.isStale()) return;
 
-  const isCurrent = () => liveLayer(host, ".StaticBackground")?.getAttribute("data-cover-id") === imageUri;
+  const isCurrent = () => {
+    const layer = liveLayer(host, ".StaticBackground");
+    return (
+      layer?.getAttribute("data-cover-id") === imageUri &&
+      layer?.getAttribute("data-bg-style") === style
+    );
+  };
   if (isCurrent()) {
-    // Same image under a different style (no artist header): just clear anything else.
+    // Same image under a different style: just clear anything else.
     retireLayers(host, liveLayer(host, ".StaticBackground")!);
     return;
   }
@@ -543,8 +579,13 @@ async function applyImageBackground(host: HTMLElement, track: TrackSnapshot, sty
 
   const layer = document.createElement("div");
   layer.classList.add("spicy-dynamic-bg", "StaticBackground");
+  const isBlurredStyle = style === "cover-blur" || style === "artist-blur";
+  if (isBlurredStyle) {
+    layer.classList.add("BlurredBackground");
+  }
   layer.style.setProperty("--BackgroundImage", `url("${src}")`);
   layer.setAttribute("data-cover-id", imageUri);
+  layer.setAttribute("data-bg-style", style);
   host.appendChild(layer);
   revealLayer(host, layer);
 }
@@ -694,9 +735,27 @@ function reapplyPageBackground() {
 
 $backgroundStyle.listen(reapplyPageBackground);
 
+$experiment("performanceMode").listen((enabled) => {
+  if (enabled) {
+    if ($backgroundStyle.get() === "dynamic") {
+      $backgroundStyle.set("cover-blur");
+    }
+    if ($showNpvDynamicBg.get()) {
+      $showNpvDynamicBg.set(false);
+    }
+    if (!$simpleLyricsMode.get()) {
+      $simpleLyricsMode.set(true);
+    }
+    KawarpMap.forEach((kawarp) => {
+      kawarp.stop();
+    });
+  }
+  reapplyPageBackground();
+});
+
 // ─── Image blur ──────────────────────────────────────────────────────────────
 
-const MAX_BACKGROUND_BLUR = 48;
+const MAX_BACKGROUND_BLUR = 120;
 
 // Blur is a pure paint change on the existing layer, so it goes straight into a CSS
 // var rather than rebuilding the background. Only on the page: a var on <html>

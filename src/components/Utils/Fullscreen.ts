@@ -371,6 +371,7 @@ function Open(skipDocumentFullscreen: boolean = false, moveElement: boolean = tr
     // Handle DOM changes
     if (moveElement) TransferElement(SpicyPage, Root);
     SpicyPage.classList.add("Fullscreen");
+    SpicyPage.classList.toggle("CinemaView", skipDocumentFullscreen);
 
     // Hide the main element
     if (mainElement && moveElement) {
@@ -543,6 +544,7 @@ function Close(isPip: boolean = false): Promise<boolean> {
   const generation = ++fullscreenGeneration;
   Fullscreen.IsOpen = false;
   Fullscreen.CinemaViewOpen = false;
+  SpicyPage.classList.remove("CinemaView");
 
   if (isPip) {
     SpicyPage.classList.remove("Fullscreen");
@@ -607,6 +609,7 @@ function CloseImmediately() {
   closeInFlight = null;
   Fullscreen.IsOpen = false;
   Fullscreen.CinemaViewOpen = false;
+  SpicyPage.classList.remove("CinemaView");
   document.body.style.removeProperty("pointer-events");
 
   if (IsPIP) {

@@ -73,6 +73,30 @@ export type Experiment = {
 
 export const EXPERIMENTS = [
   {
+    id: "performanceMode",
+    label: "Performance Mode",
+    description:
+      "Drops the per-letter spring physics, glows, text-shadow blurs, distance blur on surrounding lines and backdrop blurs, disables dynamic backgrounds, forces Simple Lyrics Mode, removes heavy button springs, and stops the animation loop while playback is paused, for lower CPU and GPU use. Disable to bring back the full animation and blur effects.",
+    default: true,
+    pageClass: "Exp_PerformanceMode",
+  },
+  {
+    id: "dualLineRomanization",
+    label: "Dual-Line Romanization",
+    description:
+      "Shows the original script in small font above and the romanized text below (YouTube Music style). Turning this off restores the single-line romanized view.",
+    default: true,
+    pageClass: "Exp_DualLineRomanization",
+  },
+  {
+    id: "geniusSingerAttribution",
+    label: "Genius Singer Attribution",
+    description:
+      "Identifies and displays singer names for songs by groups and collaborations using Genius. Turning this off hides singer badges.",
+    default: true,
+    pageClass: "Exp_GeniusSingerAttribution",
+  },
+  {
     id: "newProgressBarStyling",
     label: "New SliderBar Styling",
     description:
@@ -157,14 +181,6 @@ export const EXPERIMENTS = [
       "In Minimal Lyrics Mode, a line that ends while one above it is still being sung (overlapping lines, background vocals) stays on screen, dimmed, instead of fading out early. Disable to fade every sung line out as soon as it ends.",
     default: true,
     pageClass: "Exp_KeepOverlappingLines",
-  },
-  {
-    id: "performanceMode",
-    label: "Performance Mode",
-    description:
-      "Drops the per-letter spring physics, glows, text-shadow blurs, distance blur on the surrounding lines and backdrop blurs, and stops the animation loop while playback is paused, for lower CPU and GPU use. Disable to bring back the full animation and blur effects.",
-    default: true,
-    pageClass: "Exp_PerformanceMode",
   },
 ] as const satisfies readonly Experiment[];
 

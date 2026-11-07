@@ -70,6 +70,7 @@ import Logger from "../../utils/Logger.ts";
 import { setStockPlaybarPage } from "../../utils/themeMatcher.ts";
 import {
   ApplyExperimentClasses,
+  isExperimentEnabled,
   onExperimentChange,
   onExperimentDefinitionChange,
 } from "../../utils/experiments.ts";
@@ -286,7 +287,7 @@ async function OpenPage(
     elem.classList.add("UseSpicyFont");
   }
 
-  if ($simpleLyricsMode.get()) {
+  if ($simpleLyricsMode.get() || isExperimentEnabled("performanceMode")) {
     elem.classList.add("SimpleLyricsMode");
   }
 
@@ -737,10 +738,12 @@ function AppendViewControls(ReAppend: boolean = false) {
           // If we're in cinema view, go to full fullscreen
           if (Fullscreen.CinemaViewOpen) {
             Fullscreen.CinemaViewOpen = false;
+            PageContainer?.classList.remove("CinemaView");
             await EnterSpicyLyricsFullscreen();
             PageView.AppendViewControls(true);
           } else {
             Fullscreen.CinemaViewOpen = true;
+            PageContainer?.classList.add("CinemaView");
             await ExitFullscreenElement();
             PageView.AppendViewControls(true);
           }
@@ -881,8 +884,15 @@ $showVolumeSlider.listen((v) => {
 onExperimentChange((experiment) => {
   if (!PageContainer) return;
   ApplyExperimentClasses(PageContainer);
+  if (experiment.id === "performanceMode") {
+    const isPerf = isExperimentEnabled("performanceMode");
+    PageContainer.classList.toggle("SimpleLyricsMode", isPerf || $simpleLyricsMode.get());
+    const uri = SpotifyPlayer.GetUri();
+    $currentLyricsData.set("");
+    if (uri) fetchLyrics(uri).then(ApplyLyrics);
+  }
   // Its letter split and word springs are fixed when the lyrics are built, so rebuild them.
-  if (experiment.id === "refreshedSimpleLyrics" && $simpleLyricsMode.get()) {
+  if (experiment.id === "refreshedSimpleLyrics" && ($simpleLyricsMode.get() || isExperimentEnabled("performanceMode"))) {
     const uri = SpotifyPlayer.GetUri();
     $currentLyricsData.set("");
     if (uri) fetchLyrics(uri).then(ApplyLyrics);

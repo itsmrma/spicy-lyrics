@@ -15,10 +15,12 @@ Spicy Lyrics replaces Spotify's lyrics view with animated lyrics, dynamic backgr
 
 | Area | Upstream | This fork |
 |------|----------|-----------|
-| Animation cost | Per-letter springs, glow and text-shadow blurs, distance blurs, backdrop blurs run all the time | **Performance Mode on by default**: letter springs, per-letter glow and shadow writes, line distance blur and container backdrop blurs are bypassed; lines are separated by opacity alone |
+| Animation cost | Per-letter springs, glow and text-shadow blurs, distance blurs, backdrop blurs run all the time | **Performance Mode on by default**: letter springs, per-letter glow and shadow writes, line distance blur and container backdrop blurs are bypassed; lines are separated by opacity alone; heavy dynamic/animated backgrounds are locked off and Simple Lyrics Mode is enforced |
 | Idle cost | The frame loop keeps animating while playback is paused | Animator and scroll passes are skipped while paused and the position has not moved |
-| Cinema Mode | Playback controls sit on top of the album artwork | Controls sit under the song title and artist; the artwork is unobstructed |
-| Now Playing sidebar | Romanization only in the full lyrics page | Romanization toggle in the compact Now Playing View card, synced with the global setting |
+| Cinema Mode & Fullscreen | Playback controls sit on top of artwork; active repeat/shuffle buttons have glow | Controls sit unobstructed; shuffle & repeat use clean indicator dots underneath without heavy drop-shadows |
+| Background styles | Solid, Dynamic, Animated NPV, Static Image | Adds **Cover Art (Blurred)** and **Artist Image (Blurred)** full-bleed background modes |
+| Romanization | Single-line replacement; Japanese words squished together without spacing and with spelling particle misreadings | **Natural word-spaced Japanese romaji** with phonetic particles (`wa`, `o`, `e`); **Dual-Line Romanization (YouTube Music style)** showing original script in small font above the romanized text |
+| Singer attribution | Anonymous TTML agent IDs (`v1`, `v2`) or none | **Genius Singer Attribution**: automatically identifies and tags who sings which part in group songs and collaborations with singer badges and duet side-alignment |
 
 Everything else — lyrics fetching, word-synced TTML, dynamic backgrounds, themes, settings — comes from upstream unchanged.
 
@@ -31,7 +33,33 @@ While it is on:
 - letters no longer bounce, glow or write per-frame shadow styles — the gradient sweep still follows the audio exactly;
 - surrounding lines keep their distance without a blur, using `opacity: 1` for the active line, `0.55` for unsung and `0.35` for sung;
 - glass surfaces become flat dark panels instead of `backdrop-filter` blurs;
+- dynamic background animations (Kawarp dynamic canvas & animated NPV video) are disabled to protect CPU/GPU;
+- Simple Lyrics Mode is locked on to avoid heavy DOM animation layers;
 - pausing playback stops the animator and the auto-scroll pass until the position changes again.
+
+### Dual-Line Romanization (YouTube Music style)
+
+When romanization is enabled, lines display the **original script in small font above** (e.g. Japanese Kanji/Kana, Korean Hangul, Chinese Hanzi, Cyrillic) and the **romanized text below** as the main singing line.
+- Synced word animations follow the romanized text.
+- Click-to-seek works across the entire line.
+- Can be toggled in **Settings → Experiments** (`Dual-Line Romanization`).
+
+### High-Precision Japanese Romanization
+
+Upstream Japanese romanization concatenated words into continuous unspaced strings and misread grammatical particles. This fork features:
+- **Intelligent word spacing**: uses Kuromoji morphological tokens and Hepburn word boundaries to format romaji naturally (`watashi wa utau` instead of `watashiwautau`).
+- **Phonetic particle readings**: particles は, へ, を correctly romanize to `wa`, `e`, `o`.
+- **Special greetings**: `konnichiwa` and `konbanwa` properly handled.
+- Word-synced syllable boundaries preserve natural word separation.
+
+### Genius Singer Attribution
+
+For songs performed by groups (e.g. BTS, BLACKPINK, TWICE) or collaborations:
+- Automatically searches and fetches section-level singer tags from Genius (`[Verse 1: Jungkook]`, `[Chorus: All]`, etc.).
+- Robust similarity alignment matches the synced playback timeline to the corresponding singer parts.
+- Displays sleek singer badges on each line.
+- Two-singer duets automatically align to opposite sides for an intuitive duet layout.
+- Can be toggled in **Settings → Experiments** (`Genius Singer Attribution`).
 
 ## Installation
 
