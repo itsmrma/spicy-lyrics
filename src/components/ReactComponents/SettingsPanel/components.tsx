@@ -169,6 +169,34 @@ export function Select({
   );
 }
 
+export function TextInput({
+  value,
+  placeholder,
+  onChange,
+  disabled,
+  label,
+  type = "text",
+}: {
+  value: string;
+  placeholder?: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  label?: string;
+  type?: string;
+}) {
+  return (
+    <input
+      type={type}
+      className="sl-sp-input"
+      aria-label={label}
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => onChange(e.currentTarget.value)}
+      disabled={disabled}
+    />
+  );
+}
+
 /**
  * Bipolar position slider — a snapping range control centred on a neutral
  * point with a negative axis to the left and a positive axis to the right.

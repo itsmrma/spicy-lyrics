@@ -90,9 +90,9 @@ export const EXPERIMENTS = [
   },
   {
     id: "geniusSingerAttribution",
-    label: "Genius Singer Attribution",
+    label: "Singer Attribution",
     description:
-      "Identifies and displays singer names for songs by groups and collaborations using Genius. Turning this off hides singer badges.",
+      "Identifies and displays singer badges for group tracks and duets (supports native Apple Music TTML tracks, automatic duet attribution, and Genius via custom proxy/token). Turning this off hides singer badges.",
     default: true,
     pageClass: "Exp_GeniusSingerAttribution",
   },

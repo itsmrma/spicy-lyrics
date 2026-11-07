@@ -1432,43 +1432,76 @@ export function Animate(position: number): void {
               }
             }
 
-            word.AnimatorStore.Scale.SetGoal(targetScale);
-            // Refreshed: the float already eases, so the spring is pinned to it.
-            word.AnimatorStore.YOffset.SetGoal(targetYOffset, refreshedSimple);
-            word.AnimatorStore.Glow.SetGoal(targetGlow);
-
-            const currentScale = word.AnimatorStore.Scale.Step(deltaTime);
-            const currentYOffset = word.AnimatorStore.YOffset.Step(deltaTime);
-            const currentGlow = word.AnimatorStore.Glow.Step(deltaTime);
-
-            setStyleIfChanged(word.HTMLElement, "scale", `${currentScale}`, 0.001);
-            // Use translate3d to ensure GPU-accelerated transforms
-            setStyleIfChanged(
-              word.HTMLElement,
-              "transform",
-              `translate3d(0, calc(var(--DefaultLyricsSize) * ${currentYOffset}), 0)`,
-              0.0001,
-              currentYOffset
-            );
-            if (!isLetterGroup) {
-              if ($simpleLyricsMode.get()) {
-                setStyleIfChanged(word.HTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+            if (performanceMode) {
+              if (!isLetterGroup) {
+                if ($simpleLyricsMode.get()) {
+                  setStyleIfChanged(word.HTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                } else {
+                  setStyleIfChanged(word.HTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                }
+                if (word.OriginalHTMLElement) {
+                  if ($simpleLyricsMode.get()) {
+                    setStyleIfChanged(word.OriginalHTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                  } else {
+                    setStyleIfChanged(word.OriginalHTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                  }
+                }
+                continue;
               } else {
-                setStyleIfChanged(word.HTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                if (word.OriginalHTMLElement) {
+                  if ($simpleLyricsMode.get()) {
+                    setStyleIfChanged(word.OriginalHTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                  } else {
+                    setStyleIfChanged(word.OriginalHTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                  }
+                }
               }
-              // Reduce redundant writes using thresholds for smoother performance
+            } else {
+              word.AnimatorStore.Scale.SetGoal(targetScale);
+              // Refreshed: the float already eases, so the spring is pinned to it.
+              word.AnimatorStore.YOffset.SetGoal(targetYOffset, refreshedSimple);
+              word.AnimatorStore.Glow.SetGoal(targetGlow);
+
+              const currentScale = word.AnimatorStore.Scale.Step(deltaTime);
+              const currentYOffset = word.AnimatorStore.YOffset.Step(deltaTime);
+              const currentGlow = word.AnimatorStore.Glow.Step(deltaTime);
+
+              setStyleIfChanged(word.HTMLElement, "scale", `${currentScale}`, 0.001);
+              // Use translate3d to ensure GPU-accelerated transforms
               setStyleIfChanged(
                 word.HTMLElement,
-                "--text-shadow-blur-radius",
-                `${4 + 2 * currentGlow * 1}px`,
-                0.5
+                "transform",
+                `translate3d(0, calc(var(--DefaultLyricsSize) * ${currentYOffset}), 0)`,
+                0.0001,
+                currentYOffset
               );
-              setStyleIfChanged(
-                word.HTMLElement,
-                "--text-shadow-opacity",
-                `${Math.min(currentGlow * 35, 100)}%`,
-                1
-              );
+              if (!isLetterGroup) {
+                if ($simpleLyricsMode.get()) {
+                  setStyleIfChanged(word.HTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                } else {
+                  setStyleIfChanged(word.HTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                }
+                // Reduce redundant writes using thresholds for smoother performance
+                setStyleIfChanged(
+                  word.HTMLElement,
+                  "--text-shadow-blur-radius",
+                  `${4 + 2 * currentGlow * 1}px`,
+                  0.5
+                );
+                setStyleIfChanged(
+                  word.HTMLElement,
+                  "--text-shadow-opacity",
+                  `${Math.min(currentGlow * 35, 100)}%`,
+                  1
+                );
+              }
+              if (word.OriginalHTMLElement) {
+                if ($simpleLyricsMode.get()) {
+                  setStyleIfChanged(word.OriginalHTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                } else {
+                  setStyleIfChanged(word.OriginalHTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                }
+              }
             }
           } else if (isDot && !isLetterGroup && refreshedSimple) {
             animateRefreshedDot(line, word, wordIndex, ProcessedPosition);

@@ -167,6 +167,10 @@
   left: calc(100% - var(--NowBarWidth) - var(--NowBarLeftSpacing));
 }
 
+#SpicyLyricsPage.CinemaView .ContentBox .NowBar.Active {
+  transform: translateX(2.5cqw);
+}
+
 #SpicyLyricsPage .ContentBox .NowBar .Header .MediaBox {
   --ArtworkBrightness: 1;
   --ControlsOpacity: 0;

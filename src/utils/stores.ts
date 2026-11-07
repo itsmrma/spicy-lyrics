@@ -162,6 +162,10 @@ export const $smoothScrolling = persistAtom<boolean>("smoothScrolling", false);
 export const $animationFpsCapEnabled = persistAtom<boolean>("animationFpsCapEnabled", false);
 export const $animationFpsCap = persistAtom<number>("animationFpsCap", 60);
 
+// Genius integration settings
+export const $geniusAccessToken = persistAtom<string>("geniusAccessToken", "");
+export const $geniusProxyUrl = persistAtom<string>("geniusProxyUrl", "");
+
 // Version atom — NOT persisted, set once at startup
 export const $spicyLyricsVersion = atom<string>(
   (window as any)._spicy_lyrics_metadata?.LoadedVersion ?? ProjectVersion

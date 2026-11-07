@@ -726,6 +726,33 @@ sl-generic-modal.SpicyLyricsModal .sl-modal-overlay {
     }
   }
 
+  .sl-sp-input {
+    background: var(--accent-tint-bg);
+    color: var(--color-text-primary);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: var(--text-caption-size) !important;
+    font-weight: var(--w-regular);
+    outline: none;
+    transition:
+      background var(--dur-fast) var(--ease-standard),
+      box-shadow var(--dur-fast) var(--ease-standard);
+    min-width: 200px;
+    box-sizing: border-box;
+
+    &:hover,
+    &:focus {
+      background: var(--accent-tint-bg-hover);
+      box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    }
+
+    &::placeholder {
+      color: var(--color-text-tertiary);
+    }
+  }
+
   /* Bipolar position slider — a recessed groove (matching the toggle's dark
      slot) with a fill that grows out from the centre tick toward the thumb,
      plus a value readout and an inline Reset. */

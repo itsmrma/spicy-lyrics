@@ -30,8 +30,9 @@ Performance Mode is an experiment, so it lives in **Settings → Experiments**. 
 
 While it is on:
 
-- letters no longer bounce, glow or write per-frame shadow styles — the gradient sweep still follows the audio exactly;
+- letters no longer bounce, glow or write per-frame shadow styles — the gradient sweep still follows the audio smoothly and continuously, including on sustained/held words;
 - surrounding lines keep their distance without a blur, using `opacity: 1` for the active line, `0.55` for unsung and `0.35` for sung;
+- smooth, linear line scrolling without bouncing ripple cascades, keeping background vocal lines and duets centered without layout stutter;
 - glass surfaces become flat dark panels instead of `backdrop-filter` blurs;
 - dynamic background animations (Kawarp dynamic canvas & animated NPV video) are disabled to protect CPU/GPU;
 - Simple Lyrics Mode is locked on to avoid heavy DOM animation layers;
@@ -40,7 +41,7 @@ While it is on:
 ### Dual-Line Romanization (YouTube Music style)
 
 When romanization is enabled, lines display the **original script in small font above** (e.g. Japanese Kanji/Kana, Korean Hangul, Chinese Hanzi, Cyrillic) and the **romanized text below** as the main singing line.
-- Synced word animations follow the romanized text.
+- Both the romanized text and the original script animate synchronously with the karaoke gradient sweep.
 - Click-to-seek works across the entire line.
 - Can be toggled in **Settings → Experiments** (`Dual-Line Romanization`).
 
@@ -54,12 +55,121 @@ Upstream Japanese romanization concatenated words into continuous unspaced strin
 
 ### Genius Singer Attribution
 
-For songs performed by groups (e.g. BTS, BLACKPINK, TWICE) or collaborations:
-- Automatically searches and fetches section-level singer tags from Genius (`[Verse 1: Jungkook]`, `[Chorus: All]`, etc.).
-- Robust similarity alignment matches the synced playback timeline to the corresponding singer parts.
-- Displays sleek singer badges on each line.
-- Two-singer duets automatically align to opposite sides for an intuitive duet layout.
+For songs performed by groups (e.g. BTS) or collaborations:
+- Automatically searches and fetches section-level singer tags from Genius (`[Verse 1: Jungkook]`, `[Chorus: All]`, `[Verse 2: RM & SUGA]`, etc.).
+- **Multi-singer breakdown**: recognizes Genius transcription guidelines where multiple vocalists in the same section are distinguished by style (1st vocalist = standard, 2nd vocalist = italic, 3rd vocalist = bold, 4th = bold-italic) to attribute only the active singer singing at that moment.
+- **Zero-shift gutter placement**: singer badges sit in the left gutter beside the lyrics without displacing or altering the original lyrics layout and horizontal alignment. In case of multi-singer moments or long names, badges cleanly stack vertically.
+- **Persistent Caching**: once fetched, singer breakdowns are saved in persistent storage (`Spicetify.LocalStorage`) for instant 0ms loads on replay.
 - Can be toggled in **Settings → Experiments** (`Genius Singer Attribution`).
+
+#### Setting up the Cloudflare Worker Proxy
+
+Because `genius.com` blocks direct automated scraper requests with Cloudflare bot challenges (`403 Forbidden`), a free Cloudflare Worker fetches the lyrics through clean mirror instances without anti-bot blocks:
+
+1. Create a free worker on [dash.cloudflare.com](https://dash.cloudflare.com/) (**Workers & Pages** → **Create Application** → **Create Worker**).
+2. Click **Edit code** and paste the following snippet:
+
+```javascript
+export default {
+  async fetch(request, env) {
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "*",
+        },
+      });
+    }
+
+    const url = new URL(request.url);
+    const title = url.searchParams.get("title");
+    const artist = url.searchParams.get("artist");
+
+    if (!title) {
+      return new Response(JSON.stringify({ error: "Missing title parameter" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+
+    const token =
+      request.headers.get("Authorization")?.replace("Bearer ", "") ||
+      env.GENIUS_TOKEN ||
+      "";
+
+    let songPath = null;
+
+    if (token) {
+      try {
+        const searchRes = await fetch(
+          `https://api.genius.com/search?q=${encodeURIComponent(title + " " + (artist || ""))}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (searchRes.ok) {
+          const data = await searchRes.json();
+          const hits = data?.response?.hits;
+          if (hits && hits.length > 0) {
+            const hit =
+              hits.find(
+                (h) =>
+                  h.result?.primary_artist?.name?.toLowerCase().includes((artist || "").toLowerCase())
+              ) || hits[0];
+            songPath = hit?.result?.path;
+          }
+        }
+      } catch (e) {}
+    }
+
+    const mirrors = [
+      "https://dumb.bloat.cat",
+      "https://dumb.jeikobu.net",
+      "https://dumb.ducks.party",
+    ];
+
+    const cleanTitle = title.replace(/\s*-\s*.*$/g, "").trim();
+    const query = encodeURIComponent(`${cleanTitle} ${artist || ""}`.trim());
+
+    for (const mirror of mirrors) {
+      try {
+        let path = songPath;
+        if (!path) {
+          const searchRes = await fetch(`${mirror}/search?q=${query}`, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+          });
+          if (!searchRes.ok) continue;
+          const searchHtml = await searchRes.text();
+          const match = /<a id="search-item" href="(\/[^"]+-lyrics)"/i.exec(searchHtml);
+          if (!match) continue;
+          path = match[1];
+        }
+
+        const pageRes = await fetch(`${mirror}${path}`, {
+          headers: { "User-Agent": "Mozilla/5.0" },
+        });
+        if (!pageRes.ok) continue;
+        const pageHtml = await pageRes.text();
+
+        return new Response(JSON.stringify({ html: pageHtml, path }), {
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      } catch (err) {}
+    }
+
+    return new Response(JSON.stringify({ error: "Lyrics not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    });
+  },
+};
+```
+
+3. Click **Deploy**.
+4. Test in your browser: `https://<your-worker>.workers.dev/?title=Butter&artist=BTS` (returns JSON lyrics).
+5. In Spotify, paste your Worker URL (`https://<your-worker>.workers.dev`) into **Settings → Lyrics → Genius Proxy URL**.
 
 ## Installation
 

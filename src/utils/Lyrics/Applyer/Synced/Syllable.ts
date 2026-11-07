@@ -268,31 +268,26 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
     const showSinger =
       isExperimentEnabled("geniusSingerAttribution") && !!singerName;
 
-    if (showDual || showSinger) {
-      const headerElem = document.createElement("div");
-      headerElem.classList.add("LineHeader");
-
-      if (showSinger && singerName) {
+    if (showSinger && singerName) {
+      const singerContainer = document.createElement("div");
+      singerContainer.classList.add("SingerBadgeContainer");
+      const singerNames = singerName.split(/\s*[,&]\s*/).filter(Boolean);
+      for (const name of singerNames) {
         const singerElem = document.createElement("span");
         singerElem.classList.add("SingerBadge");
-        singerElem.textContent = singerName;
-        headerElem.appendChild(singerElem);
+        singerElem.textContent = name.trim();
+        singerContainer.appendChild(singerElem);
       }
+      lineElem.appendChild(singerContainer);
+    }
 
-      if (showDual) {
-        const origText = line.Lead.Syllables.map((s, idx) =>
-          s.Text + (s.IsPartOfWord || idx === line.Lead.Syllables.length - 1 ? "" : " ")
-        )
-          .join("")
-          .trim();
-        if (origText) {
-          const origElem = document.createElement("span");
-          origElem.classList.add("OriginalScript");
-          origElem.textContent = StripZeroWidth(origText);
-          headerElem.appendChild(origElem);
-        }
-      }
-
+    let origElem: HTMLElement | null = null;
+    if (showDual) {
+      const headerElem = document.createElement("div");
+      headerElem.classList.add("LineHeader");
+      origElem = document.createElement("span");
+      origElem.classList.add("OriginalScript");
+      headerElem.appendChild(origElem);
       lineElem.appendChild(headerElem);
       lineElem.classList.add("DualLine");
     }
@@ -301,10 +296,6 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
 
     renderableSyllables(line.Lead.Syllables).forEach((lead, iL, aL) => {
       let word = document.createElement("span");
-
-      if (isRtl(lead.Text) && !lineElem.classList.contains("rtl")) {
-        lineElem.classList.add("rtl");
-      }
 
       const totalDuration = ConvertTime(lead.EndTime) - ConvertTime(lead.StartTime);
 
@@ -317,6 +308,21 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
           ? lead.RomanizedIsPartOfWord
           : lead.IsPartOfWord;
 
+      let origWord: HTMLSpanElement | null = null;
+      if (origElem) {
+        origWord = document.createElement("span");
+        origWord.classList.add("orig-word");
+        origWord.textContent = StripZeroWidth(lead.Text);
+        if (leadIsPartOfWord) {
+          origWord.classList.add("PartOfWord");
+        }
+        origElem.appendChild(origWord);
+      }
+
+      if (isRtl(lead.Text) && !lineElem.classList.contains("rtl")) {
+        lineElem.classList.add("rtl");
+      }
+
       // Too short to split whatever its letters: skip the grapheme split.
       const letters = totalDuration >= MinLetterCapableDuration() ? SplitLetters(leadRenderText) : [];
       const letterLength = letters.length;
@@ -326,7 +332,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
 
       if (IfLetterCapable) {
         word = document.createElement("div");
-        Emphasize(letters, word, lead);
+        Emphasize(letters, word, lead, false, origWord ?? undefined);
 
         iL === aL.length - 1
           ? word.classList.add("LastWordInLine")
@@ -362,6 +368,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
         if (LyricsObject.Types.Syllable.Lines[CurrentLineLyricsObject]?.Syllables?.Lead) {
           LyricsObject.Types.Syllable.Lines[CurrentLineLyricsObject].Syllables?.Lead.push({
             HTMLElement: word,
+            OriginalHTMLElement: origWord ?? undefined,
             StartTime: ConvertTime(lead.StartTime),
             EndTime: ConvertTime(lead.EndTime),
             TotalTime: totalDuration,
@@ -426,31 +433,26 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
         const showBgSinger =
           isExperimentEnabled("geniusSingerAttribution") && !!bgSingerName;
 
-        if (showBgDual || showBgSinger) {
-          const headerElem = document.createElement("div");
-          headerElem.classList.add("LineHeader");
-
-          if (showBgSinger && bgSingerName) {
+        if (showBgSinger && bgSingerName) {
+          const singerContainer = document.createElement("div");
+          singerContainer.classList.add("SingerBadgeContainer");
+          const singerNames = bgSingerName.split(/\s*[,&]\s*/).filter(Boolean);
+          for (const name of singerNames) {
             const singerElem = document.createElement("span");
             singerElem.classList.add("SingerBadge");
-            singerElem.textContent = bgSingerName;
-            headerElem.appendChild(singerElem);
+            singerElem.textContent = name.trim();
+            singerContainer.appendChild(singerElem);
           }
+          lineE.appendChild(singerContainer);
+        }
 
-          if (showBgDual) {
-            const origText = bg.Syllables.map((s, idx) =>
-              s.Text + (s.IsPartOfWord || idx === bg.Syllables.length - 1 ? "" : " ")
-            )
-              .join("")
-              .trim();
-            if (origText) {
-              const origElem = document.createElement("span");
-              origElem.classList.add("OriginalScript");
-              origElem.textContent = StripZeroWidth(origText);
-              headerElem.appendChild(origElem);
-            }
-          }
-
+        let bgOrigElem: HTMLElement | null = null;
+        if (showBgDual) {
+          const headerElem = document.createElement("div");
+          headerElem.classList.add("LineHeader");
+          bgOrigElem = document.createElement("span");
+          bgOrigElem.classList.add("OriginalScript");
+          headerElem.appendChild(bgOrigElem);
           lineE.appendChild(headerElem);
           lineE.classList.add("DualLine");
         }
@@ -459,10 +461,6 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
 
         renderableSyllables(bg.Syllables).forEach((bw, bI, bA) => {
           let bwE = document.createElement("span");
-
-          if (isRtl(bw.Text) && !lineE.classList.contains("rtl")) {
-            lineE.classList.add("rtl");
-          }
 
           const totalDuration = ConvertTime(bw.EndTime) - ConvertTime(bw.StartTime);
 
@@ -475,6 +473,21 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
               ? bw.RomanizedIsPartOfWord
               : bw.IsPartOfWord;
 
+          let bgOrigWord: HTMLSpanElement | null = null;
+          if (bgOrigElem) {
+            bgOrigWord = document.createElement("span");
+            bgOrigWord.classList.add("orig-word");
+            bgOrigWord.textContent = StripZeroWidth(bw.Text);
+            if (bwIsPartOfWord) {
+              bgOrigWord.classList.add("PartOfWord");
+            }
+            bgOrigElem.appendChild(bgOrigWord);
+          }
+
+          if (isRtl(bw.Text) && !lineE.classList.contains("rtl")) {
+            lineE.classList.add("rtl");
+          }
+
           // Too short to split whatever its letters: skip the grapheme split.
           const letters = totalDuration >= MinLetterCapableDuration() ? SplitLetters(bgRenderText) : [];
           const letterLength = letters.length;
@@ -484,7 +497,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
 
           if (IfLetterCapable) {
             bwE = document.createElement("div");
-            Emphasize(letters, bwE, bw, true);
+            Emphasize(letters, bwE, bw, true, bgOrigWord ?? undefined);
 
             bI === bA.length - 1
               ? bwE.classList.add("LastWordInLine")
@@ -513,6 +526,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
             if (LyricsObject.Types.Syllable.Lines[CurrentLineLyricsObject]?.Syllables?.Lead) {
               LyricsObject.Types.Syllable.Lines[CurrentLineLyricsObject].Syllables?.Lead.push({
                 HTMLElement: bwE,
+                OriginalHTMLElement: bgOrigWord ?? undefined,
                 StartTime: ConvertTime(bw.StartTime),
                 EndTime: ConvertTime(bw.EndTime),
                 TotalTime: ConvertTime(bw.EndTime) - ConvertTime(bw.StartTime),

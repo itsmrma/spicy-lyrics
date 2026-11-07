@@ -43,7 +43,7 @@ async function enrichWithSingers(lyricsData: any): Promise<void> {
     const artists = SpotifyPlayer.GetArtists();
     const artist = artists?.[0]?.name;
     if (title && artist) {
-      await enrichLyricsWithGeniusSingers(lyricsData, title, artist);
+      await enrichLyricsWithGeniusSingers(lyricsData, title, artist, artists);
     }
   } catch (err) {
     lyricsLogger.debug("Singer attribution enrichment error", err);

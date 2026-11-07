@@ -2,13 +2,15 @@ import { useStore } from "@nanostores/react";
 import {
   $creditsFollowLastLine,
   $duetLinePadding,
+  $geniusAccessToken,
+  $geniusProxyUrl,
   $joinSplitWords,
   $lineHoverBackground,
   $minimalLyricsMode,
   $simpleLyricsMode,
 } from "../../../utils/stores.ts";
 import { $experiment } from "../../../utils/experiments.ts";
-import { Toggle } from "./components.tsx";
+import { TextInput, Toggle } from "./components.tsx";
 import { LyricsIcon } from "./icons.tsx";
 import type { GroupDef, SectionDef } from "./model.ts";
 
@@ -113,6 +115,42 @@ const groups: GroupDef[] = [
             label={label}
             checked={useStore($creditsFollowLastLine)}
             onChange={(v) => $creditsFollowLastLine.set(v)}
+          />
+        ),
+      },
+    ],
+  },
+  {
+    title: "Singer Attribution",
+    settings: [
+      {
+        id: "geniusProxyUrl",
+        label: "Genius Proxy URL",
+        description:
+          "URL of a CORS proxy or Cloudflare Worker that fetches Genius lyrics without Cloudflare bot protection blocking the request.",
+        keywords: "genius proxy worker cloudflare singer attribution",
+        Control: ({ label }) => (
+          <TextInput
+            label={label}
+            placeholder="e.g. https://my-worker.workers.dev"
+            value={useStore($geniusProxyUrl)}
+            onChange={(v) => $geniusProxyUrl.set(v)}
+          />
+        ),
+      },
+      {
+        id: "geniusAccessToken",
+        label: "Genius Client Access Token",
+        description:
+          "Optional Genius API client token (from genius.com/api-clients). Used if your proxy requires it, or for metadata search.",
+        keywords: "genius token api client key",
+        Control: ({ label }) => (
+          <TextInput
+            type="password"
+            label={label}
+            placeholder="Genius Access Token"
+            value={useStore($geniusAccessToken)}
+            onChange={(v) => $geniusAccessToken.set(v)}
           />
         ),
       },
