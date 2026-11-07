@@ -1,5 +1,9 @@
 import { useStore } from "@nanostores/react";
 import {
+  ClearGeniusCache,
+  useLyricsCacheStats,
+} from "../../../utils/LyricsCacheTools.ts";
+import {
   $creditsFollowLastLine,
   $duetLinePadding,
   $geniusAccessToken,
@@ -153,6 +157,29 @@ const groups: GroupDef[] = [
             onChange={(v) => $geniusAccessToken.set(v)}
           />
         ),
+      },
+      {
+        id: "clearGeniusSingerCache",
+        label: "Clear Singer Attribution Cache",
+        description:
+          "Delete all cached Genius singer attributions. They are normally persisted for up to 30 days.",
+        keywords: "clear genius singer cache storage size",
+        useNote: () => {
+          const { formattedGenius, geniusCount } = useLyricsCacheStats();
+          return `Occupying ${formattedGenius} (${geniusCount} ${geniusCount === 1 ? "song" : "songs"} cached).`;
+        },
+        Control: () => {
+          const { formattedGenius } = useLyricsCacheStats();
+          return (
+            <button
+              type="button"
+              className="sl-sp-btn"
+              onClick={() => ClearGeniusCache(true)}
+            >
+              Clear ({formattedGenius})
+            </button>
+          );
+        },
       },
     ],
   },

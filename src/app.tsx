@@ -73,6 +73,7 @@ import { initSession } from "./utils/SessionManager/index.ts";
 import { jitter } from "./utils/jitter.ts";
 import { StartExperimentOverridesSync } from "./utils/experiments.ts";
 import { getRemoteConfig, StartRemoteConfigSync } from "./utils/remoteConfig.ts";
+import { ensurePersistence } from "./utils/db.ts";
 
 async function main() {
   const appLogger = new Logger("App");
@@ -82,6 +83,7 @@ async function main() {
   // First thing: it needs nothing from Spotify, and the sooner it lands the
   // fewer boot-time requests run on last session's values.
   StartRemoteConfigSync();
+  void ensurePersistence();
 
   if (App.isDev() || $developerMode.get()) {
     appLogger.debug("Boot sequence");
