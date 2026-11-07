@@ -53,6 +53,7 @@ export interface LineAnimatorStore {
 // Define the Lead item interface for syllables
 export interface SyllableLead {
   HTMLElement: HTMLElement;
+  OriginalHTMLElement?: HTMLElement;
   StartTime: number;
   EndTime: number;
   TotalTime: number;

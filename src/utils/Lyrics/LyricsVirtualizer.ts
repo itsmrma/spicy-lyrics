@@ -1196,7 +1196,8 @@ class LyricsVirtualizer {
       }
       // Only rows already on screen glide; a row being mounted has no previous
       // position to glide from and must appear where it belongs.
-      const wantGlide = glide && this._mountedIndices.has(item.index);
+      const wantGlide =
+        glide && !isExperimentEnabled("performanceMode") && this._mountedIndices.has(item.index);
       if ((wrapper.dataset.glide === "1") !== wantGlide) {
         wrapper.style.transition = wantGlide ? LAYOUT_GLIDE_TRANSITION : "";
         wrapper.dataset.glide = wantGlide ? "1" : "";
@@ -1264,6 +1265,7 @@ class LyricsVirtualizer {
   // start the credits where they were and glide them along with the last row.
   // Additive, so a glide started mid-glide stacks instead of jumping.
   private _glideTrailing(delta: number): void {
+    if (isExperimentEnabled("performanceMode")) return;
     for (const el of this._trailingElements()) {
       el.animate(
         [{ transform: `translateY(${-delta}px)` }, { transform: "translateY(0)" }],
@@ -1311,6 +1313,22 @@ class LyricsVirtualizer {
     }
     // Refreshed Simple Lyrics follows lines with the ripple, in place of either
     // kind of smooth scroll. The list itself moves instantly; the rows animate.
+    // In Performance Mode, disable the ripple cascade and spring scrolls entirely:
+    // scroll directly with simple, linear smooth scrolling for maximum performance.
+    const isPerf = isExperimentEnabled("performanceMode");
+    if (isPerf) {
+      this._stopCascade();
+      this._cascadeChain = false;
+      if (instant) {
+        this._stopSmoothScroll();
+        this._setConverging(true);
+        this._scrollToIndexWithRetry(index, align, instant, padding, 0, null);
+      } else {
+        this._smoothScrollToIndex(index, align, padding);
+      }
+      return;
+    }
+
     this._cascadeChain = !instant && this._refreshed;
     if (this._cascadeChain) {
       this._stopSmoothScroll();
@@ -1523,10 +1541,15 @@ class LyricsVirtualizer {
       ? scrollEl.scrollTop + this._smoothFraction
       : scrollEl.scrollTop;
 
+    const isPerf = isExperimentEnabled("performanceMode");
+    const freq = isPerf ? 1.5 : SMOOTH_SCROLL_FREQUENCY;
+    const damp = isPerf ? 1.0 : SMOOTH_SCROLL_DAMPING;
+
     if (!this._smoothSpring) {
-      this._smoothSpring = new Spring(current, SMOOTH_SCROLL_FREQUENCY, SMOOTH_SCROLL_DAMPING);
+      this._smoothSpring = new Spring(current, freq, damp);
     } else if (!animating) {
       // Starting fresh: begin at rest from wherever the list actually is.
+      this._smoothSpring = new Spring(current, freq, damp);
       this._smoothSpring.SetGoal(current, true);
     }
 
@@ -1563,11 +1586,20 @@ class LyricsVirtualizer {
     const items = v.measurementsCache;
     if (!geometry || items.length === 0) return;
     const item = this._getItemRect(v, index);
+    let effectiveSize = item.size;
+    const nextEl = this._allElements[index + 1];
+    if (
+      nextEl?.classList.contains("bg-line") &&
+      (nextEl.classList.contains("Active") || nextEl.classList.contains("GroupActive"))
+    ) {
+      const nextItem = this._getItemRect(v, index + 1);
+      effectiveSize += this._itemGap(index) + nextItem.size;
+    }
     const goal = Math.min(
       geometry.maxScroll,
       this._computeFinalScrollTop(
         item.start - this._collapsingAbove(v, index),
-        item.size,
+        effectiveSize,
         geometry.viewportHeight,
         geometry.containerOffset,
         align,
@@ -1664,6 +1696,15 @@ class LyricsVirtualizer {
     const step = scrollStep(scrollEl);
     const maxWhole = Math.floor(maxScroll / step + 1e-6) * step;
     const item = this._getItemRect(v, target.index);
+    let effectiveSize = item.size;
+    const nextEl = this._allElements[target.index + 1];
+    if (
+      nextEl?.classList.contains("bg-line") &&
+      (nextEl.classList.contains("Active") || nextEl.classList.contains("GroupActive"))
+    ) {
+      const nextItem = this._getItemRect(v, target.index + 1);
+      effectiveSize += this._itemGap(target.index) + nextItem.size;
+    }
     // On a scroll step, so the glide ends where scrollTop can actually sit, with no
     // translate left over.
     const goal = Math.min(
@@ -1671,7 +1712,7 @@ class LyricsVirtualizer {
       Math.round(
         this._computeFinalScrollTop(
           item.start - this._collapsingAbove(v, target.index),
-          item.size,
+          effectiveSize,
           geometry.viewportHeight,
           geometry.containerOffset,
           target.align,

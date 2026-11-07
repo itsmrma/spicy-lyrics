@@ -1,5 +1,6 @@
 import Logger from "../../Logger.ts";
 import { isExperimentEnabled } from "../../experiments.ts";
+import { $geniusAccessToken, $geniusProxyUrl } from "../../stores.ts";
 
 const geniusLogger = new Logger("Genius Singers");
 
@@ -11,6 +12,13 @@ export interface GeniusSection {
 
 const GENIUS_CACHE = new Map<string, { sections: GeniusSection[]; timestamp: number }>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export function clearGeniusCache(): void {
+  GENIUS_CACHE.clear();
+}
+
+$geniusProxyUrl.listen(() => clearGeniusCache());
+$geniusAccessToken.listen(() => clearGeniusCache());
 
 /** Clean song title to improve Genius search matching rate */
 export function cleanSearchTitle(title: string): string {
@@ -61,8 +69,22 @@ function computeSimilarity(a: string, b: string): number {
  * e.g. [Verse 1: Jungkook], [Chorus: All], [Jennie], [RM & J-Hope]
  */
 export function parseGeniusLyrics(textOrHtml: string): GeniusSection[] {
+  let content = textOrHtml;
+  // If full HTML is passed, isolate the lyrics container (Dumb or Genius)
+  const dumbMatch = /<div id="lyrics"[^>]*>([\s\S]*?)<\/div>/i.exec(content);
+  if (dumbMatch) {
+    content = dumbMatch[1];
+  } else {
+    const containerMatches = [
+      ...content.matchAll(/<div[^>]*data-lyrics-container="true"[^>]*>([\s\S]*?)<\/div>/gi),
+    ];
+    if (containerMatches.length > 0) {
+      content = containerMatches.map((m) => m[1]).join("\n");
+    }
+  }
+
   // Strip HTML tags and entities, translating line breaks
-  const text = textOrHtml
+  const text = content
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&amp;/g, "&")
@@ -98,7 +120,7 @@ export function parseGeniusLyrics(textOrHtml: string): GeniusSection[] {
       if (rawHeader.includes(":")) {
         const parts = rawHeader.split(":");
         singer = parts.slice(1).join(":").trim();
-      } else if (!genericHeaders.test(rawHeader)) {
+      } else if (!genericHeaders.test(rawHeader) && !/lyrics|가사|歌詞/i.test(rawHeader)) {
         singer = rawHeader;
       }
 
@@ -127,10 +149,6 @@ export function parseGeniusLyrics(textOrHtml: string): GeniusSection[] {
   return sections;
 }
 
-/** Public fallback token for Genius search queries */
-const GENIUS_PUBLIC_CLIENT_TOKEN =
-  "Z8b6o-8hK0Tz07_eXFmR5t4h1yQ-O-7XbK8Yx_k1d8u5J-Wz0x9e8y-7_h1yQ-O";
-
 /**
  * Searches Genius and fetches the lyrics section breakdown.
  */
@@ -146,46 +164,98 @@ export async function fetchGeniusSections(
 
   const cleanTitle = cleanSearchTitle(title);
   const cleanArt = cleanSearchArtist(artist);
-  const query = `${cleanTitle} ${cleanArt}`.trim();
+  const proxyUrl = $geniusProxyUrl.get().trim();
+  const token = $geniusAccessToken.get().trim();
 
-  // Try fetching Genius search API with user/public token or fallback search
-  try {
-    const searchUrl = `https://api.genius.com/search?q=${encodeURIComponent(query)}`;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${GENIUS_PUBLIC_CLIENT_TOKEN}`,
-      Accept: "application/json",
-    };
+  // 1. If custom proxy URL is configured (e.g. Cloudflare Worker or local service), use it
+  if (proxyUrl) {
+    try {
+      const u = new URL(proxyUrl);
+      u.searchParams.set("title", cleanTitle);
+      u.searchParams.set("artist", cleanArt);
+      const headers: Record<string, string> = { Accept: "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const res = await fetch(searchUrl, { headers });
-    if (res.ok) {
-      const data = await res.json();
-      const hits = data?.response?.hits;
-      if (Array.isArray(hits) && hits.length > 0) {
-        // Find best matching hit
-        const hit =
-          hits.find(
-            (h: any) =>
-              h.result?.primary_artist?.name?.toLowerCase().includes(cleanArt.toLowerCase()) ||
-              cleanArt.toLowerCase().includes(h.result?.primary_artist?.name?.toLowerCase() || "")
-          ) || hits[0];
+      geniusLogger.debug("Fetching from Genius proxy", { url: u.toString() });
+      const res = await fetch(u.toString(), { headers });
+      if (res.ok) {
+        const data = await res.json();
+        let sections: GeniusSection[] | null = null;
+        if (Array.isArray(data.sections)) {
+          sections = data.sections;
+        } else if (typeof data.lyrics === "string") {
+          sections = parseGeniusLyrics(data.lyrics);
+        } else if (typeof data.html === "string") {
+          sections = parseGeniusLyrics(data.html);
+        }
+        if (sections && sections.some((s) => s.singer)) {
+          GENIUS_CACHE.set(cacheKey, { sections, timestamp: Date.now() });
+          return sections;
+        }
+      } else {
+        geniusLogger.warn("Genius proxy returned error", { status: res.status });
+      }
+    } catch (err) {
+      geniusLogger.warn("Failed fetching from Genius proxy", err);
+    }
+  }
 
-        const songUrl = hit?.result?.url;
-        if (songUrl) {
-          geniusLogger.debug("Found Genius song URL", { songUrl });
-          const songRes = await fetch(songUrl);
-          if (songRes.ok) {
-            const html = await songRes.text();
-            const sections = parseGeniusLyrics(html);
-            if (sections.some((s) => s.singer)) {
-              GENIUS_CACHE.set(cacheKey, { sections, timestamp: Date.now() });
-              return sections;
+  // 2. If token is provided, query Genius API for the song URL
+  if (token) {
+    try {
+      const query = `${cleanTitle} ${cleanArt}`.trim();
+      const searchUrl = `https://api.genius.com/search?q=${encodeURIComponent(query)}`;
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      };
+
+      const res = await fetch(searchUrl, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        const hits = data?.response?.hits;
+        if (Array.isArray(hits) && hits.length > 0) {
+          const hit =
+            hits.find(
+              (h: any) =>
+                h.result?.primary_artist?.name?.toLowerCase().includes(cleanArt.toLowerCase()) ||
+                cleanArt.toLowerCase().includes(h.result?.primary_artist?.name?.toLowerCase() || "")
+            ) || hits[0];
+
+          const songUrl = hit?.result?.url;
+          if (songUrl) {
+            geniusLogger.debug("Found Genius song URL", { songUrl });
+            try {
+              const songRes = await fetch(songUrl);
+              if (songRes.ok) {
+                const html = await songRes.text();
+                const sections = parseGeniusLyrics(html);
+                if (sections.some((s) => s.singer)) {
+                  GENIUS_CACHE.set(cacheKey, { sections, timestamp: Date.now() });
+                  return sections;
+                }
+              } else if (songRes.status === 403) {
+                geniusLogger.warn(
+                  "Genius web page blocked by Cloudflare (403). Set up a Genius Proxy URL in Settings to scrape lyrics without Cloudflare blocks."
+                );
+              }
+            } catch (scrapeErr) {
+              geniusLogger.debug("Failed scraping Genius song page", scrapeErr);
             }
           }
         }
+      } else if (res.status === 401) {
+        geniusLogger.warn("Genius API returned 401 Unauthorized: invalid client access token.");
       }
+    } catch (err) {
+      geniusLogger.debug("Genius search API error", err);
     }
-  } catch (err) {
-    geniusLogger.debug("Genius search/scrape attempt error", err);
+  }
+
+  if (!proxyUrl && !token) {
+    geniusLogger.debug(
+      "No Genius Proxy URL or Access Token configured. (Native TTML tracks still provide native singer attribution)."
+    );
   }
 
   return null;
@@ -264,11 +334,68 @@ export function alignGeniusSingers(
 export async function enrichLyricsWithGeniusSingers(
   lyrics: any,
   title?: string,
-  artist?: string
+  artist?: string,
+  artists?: Array<{ name: string }>
 ): Promise<boolean> {
   if (!isExperimentEnabled("geniusSingerAttribution")) return false;
   if (!lyrics || !title || !artist) return false;
 
+  // 1. If lyrics already carry singer names (e.g. from native Apple Music TTML agents), keep them
+  const hasExistingSingers = (data: any): boolean => {
+    if (data.Type === "Syllable" && Array.isArray(data.Content)) {
+      return data.Content.some((v: any) => !!v.Singer || !!v.Lead?.Singer);
+    }
+    if (data.Type === "Line" && Array.isArray(data.Content)) {
+      return data.Content.some((l: any) => !!l.Singer);
+    }
+    if (data.Type === "Static" && Array.isArray(data.Lines)) {
+      return data.Lines.some((l: any) => !!l.Singer);
+    }
+    return false;
+  };
+
+  if (hasExistingSingers(lyrics)) {
+    geniusLogger.debug("Lyrics already carry native singer attributions");
+    return true;
+  }
+
+  // 2. Automatic duet attribution from OppositeAligned layout and artist list
+  if (artists && artists.length >= 2) {
+    const artist1 = artists[0].name;
+    const artist2 = artists[1].name;
+    if (lyrics.Type === "Syllable" && Array.isArray(lyrics.Content)) {
+      const hasOpposite = lyrics.Content.some((v: any) => v.OppositeAligned === true);
+      if (hasOpposite) {
+        for (const v of lyrics.Content) {
+          const s = v.OppositeAligned ? artist2 : artist1;
+          v.Singer = s;
+          if (v.Lead) v.Lead.Singer = s;
+          for (const syl of v.Lead?.Syllables || []) {
+            syl.Singer = s;
+          }
+        }
+        geniusLogger.debug("Attributed duet singers from OppositeAligned layout and artist list", {
+          artist1,
+          artist2,
+        });
+        return true;
+      }
+    } else if (lyrics.Type === "Line" && Array.isArray(lyrics.Content)) {
+      const hasOpposite = lyrics.Content.some((l: any) => l.OppositeAligned === true);
+      if (hasOpposite) {
+        for (const l of lyrics.Content) {
+          l.Singer = l.OppositeAligned ? artist2 : artist1;
+        }
+        geniusLogger.debug("Attributed duet singers from OppositeAligned layout and artist list", {
+          artist1,
+          artist2,
+        });
+        return true;
+      }
+    }
+  }
+
+  // 3. Fallback to Genius sections via proxy or search
   const sections = await fetchGeniusSections(title, artist);
   if (!sections) return false;
 

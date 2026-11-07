@@ -30,7 +30,8 @@ export default function Emphasize(
   letters: Array<string>,
   applyTo: HTMLElement,
   lead: any,
-  isBgWord: boolean = false
+  isBgWord: boolean = false,
+  originalHTMLElement?: HTMLElement
 ) {
   const StartTime = ConvertTime(lead.StartTime) - Substractions.StartTime;
   let EndTime = ConvertTime(lead.EndTime) - Substractions.EndTime;
@@ -115,6 +116,7 @@ export default function Emphasize(
   ) {
     LyricsObject.Types.Syllable.Lines[CurrentLineLyricsObject].Syllables.Lead.push({
       HTMLElement: word,
+      OriginalHTMLElement: originalHTMLElement,
       StartTime: StartTime,
       EndTime: EndTime,
       TotalTime: totalDuration,

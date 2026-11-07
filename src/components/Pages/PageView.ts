@@ -28,6 +28,8 @@ import {
   $creditsFollowLastLine,
   $currentLyricsData,
   $duetLinePadding,
+  $geniusAccessToken,
+  $geniusProxyUrl,
   $joinSplitWords,
   $lineHoverBackground,
   $lyricsContainerExists,
@@ -897,6 +899,12 @@ onExperimentChange((experiment) => {
     $currentLyricsData.set("");
     if (uri) fetchLyrics(uri).then(ApplyLyrics);
   }
+  // Dual-line romanization and singer attribution alter the markup layout, so rebuild them on toggle.
+  if (experiment.id === "dualLineRomanization" || experiment.id === "geniusSingerAttribution") {
+    const uri = SpotifyPlayer.GetUri();
+    $currentLyricsData.set("");
+    if (uri) fetchLyrics(uri).then(ApplyLyrics);
+  }
 });
 onExperimentDefinitionChange(() => {
   if (!PageContainer) return;
@@ -913,6 +921,18 @@ $viewControlsPosition.listen((v) => {
 $ttmlMakerMode.listen((v) => {
   if (!PageContainer) return;
   AppendViewControls(true);
-})
+});
+
+$geniusProxyUrl.listen(() => {
+  const uri = SpotifyPlayer.GetUri();
+  $currentLyricsData.set("");
+  if (uri) fetchLyrics(uri).then(ApplyLyrics);
+});
+
+$geniusAccessToken.listen(() => {
+  const uri = SpotifyPlayer.GetUri();
+  $currentLyricsData.set("");
+  if (uri) fetchLyrics(uri).then(ApplyLyrics);
+});
 
 export default PageView;

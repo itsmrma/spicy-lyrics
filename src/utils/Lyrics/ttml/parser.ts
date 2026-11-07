@@ -40,6 +40,8 @@ export interface TtmlDiv {
 export interface TtmlAgent {
   type?: string;
   'xml:id'?: string;
+  'ttm:name'?: string | { '#text'?: string; type?: string };
+  name?: string | { '#text'?: string; type?: string };
 }
 
 export interface TtmlTransliterationEntry {
@@ -79,6 +81,7 @@ export type TTMLLyricsType = 'Static' | 'Line' | 'Syllable';
 
 export interface ParsedStaticLine {
   Text: string;
+  Singer?: string;
   TransliteratedText?: string;
   TranslatedText?: string;
   HasTransliterations?: boolean;
@@ -88,6 +91,7 @@ export interface ParsedStaticLine {
 export interface ParsedLineVocal {
   Type: 'Vocal';
   OppositeAligned: boolean;
+  Singer?: string;
   Text: string | undefined;
   StartTime: number | undefined;
   EndTime: number | undefined;
@@ -99,6 +103,7 @@ export interface ParsedLineVocal {
 
 export interface ParsedSyllable {
   Text: string;
+  Singer?: string;
   TransliteratedText?: string;
   IsPartOfWord: boolean;
   StartTime: number | undefined;
@@ -109,6 +114,7 @@ export interface ParsedVocalGroup {
   Syllables: ParsedSyllable[];
   StartTime: number | undefined;
   EndTime: number | undefined;
+  Singer?: string;
   TransliteratedText?: string;
   TranslatedText?: string;
   HasTransliterations?: boolean;
@@ -118,6 +124,7 @@ export interface ParsedVocalGroup {
 export interface ParsedSyllableVocal {
   Type: 'Vocal';
   OppositeAligned: boolean;
+  Singer?: string;
   Lead: ParsedVocalGroup;
   Background?: ParsedVocalGroup[];
   HasTransliterations?: boolean;
@@ -159,6 +166,7 @@ type ParsedRootItem = ParsedStaticLine | ParsedLineVocal | ParsedSyllableVocal;
 interface TrackAgent {
   Type: string | undefined;
   Id: string | undefined;
+  Name?: string;
   OppositeAligned: boolean;
 }
 
@@ -542,12 +550,23 @@ function convertTTML(ttmlInput: string): ParsedTTMLLyrics | null {
     return false;
   };
 
+  const extractAgentName = (agent: TtmlAgent): string | undefined => {
+    const raw = agent["ttm:name"] ?? agent.name;
+    if (!raw) return undefined;
+    if (typeof raw === "string") return raw.trim() || undefined;
+    if (typeof raw === "object" && raw["#text"]) {
+      return String(raw["#text"]).trim() || undefined;
+    }
+    return undefined;
+  };
+
   const TrackAgents: TrackAgent[] = PostAgents.map((agent) => {
     return {
       Type: agent.type,
       Id: agent["xml:id"],
-      OppositeAligned: isOppositeAlignedAgent(agent)
-    }
+      Name: extractAgentName(agent),
+      OppositeAligned: isOppositeAlignedAgent(agent),
+    };
   });
 
   switch (lyricsType) {
@@ -570,8 +589,16 @@ function convertTTML(ttmlInput: string): ParsedTTMLLyrics | null {
           // reads as empty here — keep it, the romanized view can show it.
           if (!HasLyricsText(text) && !HasLyricsText(roman)) return;
 
+          const pAgentId =
+            (p && typeof p === 'object' ? p['ttm:agent'] : undefined) ||
+            div['ttm:agent'] ||
+            ttml.tt.body?.['ttm:agent'];
+          const trackAgent = pAgentId ? TrackAgents.find((a) => a.Id === pAgentId) : undefined;
+          const singerName = trackAgent?.Name;
+
           const line: ParsedStaticLine = {
             Text: text.trim(),
+            ...(singerName ? { Singer: singerName } : {}),
           };
 
           if (roman !== "") {
@@ -594,15 +621,24 @@ function convertTTML(ttmlInput: string): ParsedTTMLLyrics | null {
       ttmlLogger.debug('Processing line-synced lyrics');
       const transliterationLineTexts = extractTransliterationLineTexts(ttmlInput);
 
-      const buildLine = (p: TtmlPNode): ParsedLineVocal => {
+      const buildLine = (p: TtmlPNode, div?: TtmlDiv): ParsedLineVocal => {
         const pSpans = p != null && typeof p === 'object' && p.span ? toArray(p.span) : [];
         const vocalSpans = pSpans.filter(isVocalSpan);
         const begin = (typeof p === 'object' ? p?.begin : undefined) ?? vocalSpans[0]?.begin;
         const end = (typeof p === 'object' ? p?.end : undefined) ?? vocalSpans[vocalSpans.length - 1]?.end;
 
+        const pAgentId =
+          (p && typeof p === 'object' ? p['ttm:agent'] : undefined) ||
+          div?.['ttm:agent'] ||
+          ttml.tt.body?.['ttm:agent'];
+        const trackAgent = pAgentId ? TrackAgents.find((a) => a.Id === pAgentId) : undefined;
+        const isOpposite = trackAgent ? trackAgent.OppositeAligned : false;
+        const singerName = trackAgent?.Name;
+
         const line: ParsedLineVocal = {
           Type: 'Vocal',
-          OppositeAligned: false,
+          OppositeAligned: isOpposite,
+          ...(singerName ? { Singer: singerName } : {}),
           Text: getLineText(p),
           StartTime: convertTimeToSeconds(begin),
           EndTime: convertTimeToSeconds(end),
@@ -644,7 +680,7 @@ function convertTTML(ttmlInput: string): ParsedTTMLLyrics | null {
 
       const timedDivs = divs.filter((div) => div["itunes:songPart"] !== "Instrumental");
       lineLyrics.Content = timedDivs
-        .flatMap((div) => toArray(div.p).filter((p) => p != null).map(buildLine))
+        .flatMap((div) => toArray(div.p).filter((p) => p != null).map((p) => buildLine(p, div)))
         .filter((line) => HasRenderableText(line));
 
       const firstDiv = timedDivs[0] ?? divs[0];
@@ -681,6 +717,7 @@ function convertTTML(ttmlInput: string): ParsedTTMLLyrics | null {
           const pAgentId = p["ttm:agent"] || div["ttm:agent"] || ttml.tt.body["ttm:agent"];
           const trackAgent = pAgentId ? TrackAgents.find((a) => a.Id === pAgentId) : undefined;
           const isOpposite = trackAgent ? trackAgent.OppositeAligned : false;
+          const singerName = trackAgent?.Name;
           const lineKey = p['itunes:key'];
           const lineTranslitEntry = lineKey ? Transliterations?.get(lineKey) : undefined;
           const lineTranslit = lineTranslitEntry?.spans;
@@ -688,7 +725,9 @@ function convertTTML(ttmlInput: string): ParsedTTMLLyrics | null {
           const vocal: ParsedSyllableVocal = {
             Type: 'Vocal',
             OppositeAligned: isOpposite,
+            ...(singerName ? { Singer: singerName } : {}),
             Lead: {
+              ...(singerName ? { Singer: singerName } : {}),
               Syllables: [],
               StartTime: convertTimeToSeconds(p.begin),
               EndTime: convertTimeToSeconds(p.end),
@@ -703,6 +742,12 @@ function convertTTML(ttmlInput: string): ParsedTTMLLyrics | null {
             stripParentheses: false,
             scanner,
           });
+
+          if (singerName) {
+            for (const s of vocal.Lead.Syllables) {
+              s.Singer = singerName;
+            }
+          }
 
           const leadRoles = getInlineRoleTexts(p);
           const leadRoman = leadRoles.roman?.trim() ?? '';
@@ -759,7 +804,12 @@ function convertTTML(ttmlInput: string): ParsedTTMLLyrics | null {
               const bgVocalSpans = bgSpanSpans.filter(isVocalSpan);
               const bgRoles = extractRoleTexts(bgSpanSpans);
 
+              const bgAgentId = bgSpan['ttm:agent'] || pAgentId;
+              const bgTrackAgent = bgAgentId ? TrackAgents.find((a) => a.Id === bgAgentId) : undefined;
+              const bgSinger = bgTrackAgent?.Name ?? singerName;
+
               const bgVocal: ParsedVocalGroup = {
+                ...(bgSinger ? { Singer: bgSinger } : {}),
                 Syllables: buildSyllables({
                   siblings: bgSpanSpans,
                   transliterations: bgLineTranslit,
@@ -769,6 +819,12 @@ function convertTTML(ttmlInput: string): ParsedTTMLLyrics | null {
                 StartTime: undefined,
                 EndTime: undefined,
               };
+
+              if (bgSinger) {
+                for (const s of bgVocal.Syllables) {
+                  s.Singer = bgSinger;
+                }
+              }
 
               bgVocal.StartTime =
                 convertTimeToSeconds(bgVocalSpans[0]?.begin) ??

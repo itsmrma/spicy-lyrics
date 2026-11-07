@@ -30,8 +30,9 @@ Performance Mode is an experiment, so it lives in **Settings → Experiments**. 
 
 While it is on:
 
-- letters no longer bounce, glow or write per-frame shadow styles — the gradient sweep still follows the audio exactly;
+- letters no longer bounce, glow or write per-frame shadow styles — the gradient sweep still follows the audio smoothly and continuously, including on sustained/held words;
 - surrounding lines keep their distance without a blur, using `opacity: 1` for the active line, `0.55` for unsung and `0.35` for sung;
+- smooth, linear line scrolling without bouncing ripple cascades, keeping background vocal lines and duets centered without layout stutter;
 - glass surfaces become flat dark panels instead of `backdrop-filter` blurs;
 - dynamic background animations (Kawarp dynamic canvas & animated NPV video) are disabled to protect CPU/GPU;
 - Simple Lyrics Mode is locked on to avoid heavy DOM animation layers;
@@ -40,7 +41,7 @@ While it is on:
 ### Dual-Line Romanization (YouTube Music style)
 
 When romanization is enabled, lines display the **original script in small font above** (e.g. Japanese Kanji/Kana, Korean Hangul, Chinese Hanzi, Cyrillic) and the **romanized text below** as the main singing line.
-- Synced word animations follow the romanized text.
+- Both the romanized text and the original script animate synchronously with the karaoke gradient sweep.
 - Click-to-seek works across the entire line.
 - Can be toggled in **Settings → Experiments** (`Dual-Line Romanization`).
 
