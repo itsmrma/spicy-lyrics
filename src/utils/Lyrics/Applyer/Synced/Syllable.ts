@@ -27,7 +27,7 @@ import {
 } from "../../lyrics.ts";
 import { CreateLyricsContainer, DestroyAllLyricsContainers } from "../CreateLyricsContainer.ts";
 import { StripZeroWidth } from "../Utils/StripZeroWidth.ts";
-import { PickDisplayText } from "../Utils/PickDisplayText.ts";
+import { HasOriginalScriptDiff, PickDisplayText } from "../Utils/PickDisplayText.ts";
 import { initLyricsVirtualizer } from "../../LyricsVirtualizer.ts";
 import { ApplySongCredits, MarkLastLineSide } from "../Credits/ApplyLyricsCredits.ts";
 import { EmitApply, EmitNotApplyed } from "../OnApply.ts";
@@ -351,9 +351,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
     const showDual =
       isExperimentEnabled("dualLineRomanization") &&
       UseRomanized &&
-      line.Lead.Syllables.some(
-        (s) => s.TransliteratedText && s.TransliteratedText !== s.Text
-      );
+      line.Lead.Syllables.some((s) => HasOriginalScriptDiff(s));
 
     const singerName = line.Singer || line.Lead.Singer;
     const showSinger =
@@ -511,9 +509,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
         const showBgDual =
           isExperimentEnabled("dualLineRomanization") &&
           UseRomanized &&
-          bg.Syllables.some(
-            (s) => s.TransliteratedText && s.TransliteratedText !== s.Text
-          );
+          bg.Syllables.some((s) => HasOriginalScriptDiff(s));
 
         const bgSingerName = bg.Singer;
         const showBgSinger =

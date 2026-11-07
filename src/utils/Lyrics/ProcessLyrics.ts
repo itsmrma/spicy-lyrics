@@ -27,6 +27,7 @@ const GreekTextTest = /\p{Script=Greek}/u;
 // Per-item (1-char) presence tests. Once a script is confirmed present in the
 // whole song, a single matching character in an item is enough to romanize it
 // (mirrors the previous "force conversion for the detected branch" behaviour).
+const ItemJapaneseTest = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
 const ItemChineseTest = /\p{Script=Han}/u;
 const ItemKoreanTest = KoreanTextTest;
 const ItemCyrillicTest = /\p{Script=Cyrillic}/u;
@@ -318,6 +319,13 @@ const romanizeEntry = async (
 // already translated stay untouched, but still feed the line's context.
 const romanizeJapaneseGroup = async (group: RomanizeEntry[]): Promise<boolean> => {
   if (group.every((entry) => hasTransliteration(entry.target))) return false;
+  if (
+    !group.some((entry) =>
+      ItemJapaneseTest.test((entry.target.Text ?? "").normalize("NFKC"))
+    )
+  ) {
+    return false;
+  }
 
   const romanized = await RomanizeJapaneseSyllables(
     group.map((entry) => entry.target.Text ?? "")
@@ -326,6 +334,7 @@ const romanizeJapaneseGroup = async (group: RomanizeEntry[]): Promise<boolean> =
   let applied = false;
   group.forEach((entry, index) => {
     if (hasTransliteration(entry.target)) return;
+    if (!ItemJapaneseTest.test((entry.target.Text ?? "").normalize("NFKC"))) return;
 
     const item = romanized[index];
     const text = typeof item === "string" ? item : item?.text;

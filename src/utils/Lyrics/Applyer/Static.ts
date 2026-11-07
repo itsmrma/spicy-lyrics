@@ -17,7 +17,7 @@ import {
 } from "../lyrics.ts";
 import { CreateLyricsContainer, DestroyAllLyricsContainers } from "./CreateLyricsContainer.ts";
 import { StripZeroWidth } from "./Utils/StripZeroWidth.ts";
-import { PickDisplayText } from "./Utils/PickDisplayText.ts";
+import { HasOriginalScriptDiff, PickDisplayText } from "./Utils/PickDisplayText.ts";
 import { initLyricsVirtualizer } from "../LyricsVirtualizer.ts";
 import { ApplySongCredits, MarkLastLineSide } from "./Credits/ApplyLyricsCredits.ts";
 import { EmitApply, EmitNotApplyed } from "./OnApply.ts";
@@ -88,9 +88,7 @@ export function ApplyStaticLyrics(data: StaticLyricsData, UseRomanized: boolean 
     const showDual =
       isExperimentEnabled("dualLineRomanization") &&
       UseRomanized &&
-      !!line.TransliteratedText &&
-      !!line.Text &&
-      line.Text !== line.TransliteratedText;
+      HasOriginalScriptDiff(line);
 
     const showSinger =
       isExperimentEnabled("geniusSingerAttribution") && !!line.Singer;

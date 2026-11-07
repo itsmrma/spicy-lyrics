@@ -3,6 +3,7 @@ import {
   RemoveCurrentLyrics_AllCaches,
   RemoveCurrentLyrics_StateCache,
   RemoveLyricsCache,
+  useLyricsCacheStats,
 } from "../../../utils/LyricsCacheTools.ts";
 import { $developerMode } from "../../../utils/stores.ts";
 import { Toggle } from "./components.tsx";
@@ -32,13 +33,25 @@ const groups: GroupDef[] = [
       {
         id: "clearStoredLyricsCache",
         label: "Clear Stored Lyrics",
-        description: "Delete all saved lyrics. They are normally kept for up to 3 days.",
-        keywords: "clear lyrics cache",
-        Control: () => (
-          <button type="button" className="sl-sp-btn" onClick={() => RemoveLyricsCache(true)}>
-            Clear
-          </button>
-        ),
+        description:
+          "Delete all saved lyrics and singer attributions. Lyrics are kept for up to 3 days and singer attributions for up to 30 days.",
+        keywords: "clear lyrics cache storage space size",
+        useNote: () => {
+          const { formattedTotal, lyricsCount, geniusCount } = useLyricsCacheStats();
+          return `Occupying ${formattedTotal} (${lyricsCount} lyrics, ${geniusCount} singer attributions cached).`;
+        },
+        Control: () => {
+          const { formattedTotal } = useLyricsCacheStats();
+          return (
+            <button
+              type="button"
+              className="sl-sp-btn"
+              onClick={() => RemoveLyricsCache(true)}
+            >
+              Clear ({formattedTotal})
+            </button>
+          );
+        },
       },
       {
         id: "clearCurrentSongState",

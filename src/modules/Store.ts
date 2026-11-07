@@ -1,3 +1,5 @@
+import { openDB, type IDBPDatabase } from "idb"
+
 export type ExpirationSettings = {
 	Duration: number
 	Unit: "Weeks" | "Months" | "Days" | "Hours" | "Minutes" | "Seconds"
@@ -23,6 +25,45 @@ type InstantEnvelope<T> = {
 
 const instantStoreRegistry = new Set<string>()
 const expireStoreRegistry = new Set<string>()
+const expireStoreListeners = new Set<() => void>()
+
+export function onExpireStoreChange(cb: () => void): () => void {
+	expireStoreListeners.add(cb)
+	return () => {
+		expireStoreListeners.delete(cb)
+	}
+}
+
+function notifyExpireStoreChange(): void {
+	for (const cb of expireStoreListeners) {
+		try {
+			cb()
+		} catch {}
+	}
+}
+
+const EXPIRE_IDB_NAME = "spicylyrics-expire-cache"
+const EXPIRE_IDB_STORE = "entries"
+
+let expireDbPromise: Promise<IDBPDatabase> | null = null
+
+function getExpireDb(): Promise<IDBPDatabase> | null {
+	if (typeof indexedDB === "undefined") return null
+	if (!expireDbPromise) {
+		expireDbPromise = openDB(EXPIRE_IDB_NAME, 1, {
+			upgrade(db) {
+				if (!db.objectStoreNames.contains(EXPIRE_IDB_STORE)) {
+					db.createObjectStore(EXPIRE_IDB_STORE)
+				}
+			},
+		}).catch((err) => {
+			console.warn("ExpireStore: failed to open IndexedDB backing store", err)
+			expireDbPromise = null
+			throw err
+		})
+	}
+	return expireDbPromise
+}
 
 const deepClone = <V>(value: V): V => JSON.parse(JSON.stringify(value)) as V
 
@@ -166,20 +207,57 @@ export function GetExpireStore<ItemType>(
 	}
 	expireStoreRegistry.add(storeName)
 
-	const requestUrl = (itemName: string): string => `/${itemName}`
+	const requestUrl = (itemName: string): string => `/${encodeURIComponent(itemName)}`
+	const legacyRequestUrl = (itemName: string): string => `/${itemName}`
+	const idbKey = (itemName: string): string => `${storeName}:${itemName}`
 
 	const GetItem = async (itemName: string): Promise<ItemType | undefined> => {
 		if (forceNewData) return undefined
+		const now = Date.now()
 
-		const cache = await caches.open(storeName)
-		const response = await cache.match(requestUrl(itemName))
-		if (!response) return undefined
+		// 1. Check IndexedDB backing store first (persists reliably across app & PC restarts)
+		try {
+			const db = await getExpireDb()
+			if (db) {
+				const idbWrapped = (await db.get(
+					EXPIRE_IDB_STORE,
+					idbKey(itemName),
+				)) as ExpireItem<ItemType> | undefined
+				if (idbWrapped) {
+					if (idbWrapped.CacheVersion === version && idbWrapped.ExpiresAt >= now) {
+						return idbWrapped.Content
+					}
+					void db.delete(EXPIRE_IDB_STORE, idbKey(itemName)).catch(() => {})
+				}
+			}
+		} catch {}
 
-		const wrapped = (await response.json()) as ExpireItem<ItemType>
-		if (wrapped.CacheVersion !== version) return undefined
-		if (wrapped.ExpiresAt < Date.now()) return undefined
+		// 2. Fallback to CacheStorage (and backfill IndexedDB if found)
+		if (typeof caches !== "undefined") {
+			try {
+				const cache = await caches.open(storeName)
+				const response =
+					(await cache.match(requestUrl(itemName))) ??
+					(await cache.match(legacyRequestUrl(itemName)))
+				if (!response) return undefined
 
-		return wrapped.Content
+				const wrapped = (await response.json()) as ExpireItem<ItemType>
+				if (wrapped.CacheVersion !== version || wrapped.ExpiresAt < now) {
+					return undefined
+				}
+
+				try {
+					const db = await getExpireDb()
+					if (db) {
+						await db.put(EXPIRE_IDB_STORE, wrapped, idbKey(itemName))
+					}
+				} catch {}
+
+				return wrapped.Content
+			} catch {}
+		}
+
+		return undefined
 	}
 
 	const SetItem = async (
@@ -193,55 +271,162 @@ export function GetExpireStore<ItemType>(
 		}
 
 		try {
-			const cache = await caches.open(storeName)
-			await cache.put(
-				requestUrl(itemName),
-				new Response(JSON.stringify(wrapped), {
-					headers: { "Content-Type": "application/json" },
-				}),
-			)
+			const db = await getExpireDb()
+			if (db) {
+				await db.put(EXPIRE_IDB_STORE, wrapped, idbKey(itemName))
+			}
 		} catch (err) {
 			console.warn(
-				`ExpireStore "${storeName}": failed to write item "${itemName}"`,
+				`ExpireStore "${storeName}": failed to write item "${itemName}" to IndexedDB`,
 				err,
 			)
 		}
 
+		if (typeof caches !== "undefined") {
+			try {
+				const cache = await caches.open(storeName)
+				await cache.put(
+					requestUrl(itemName),
+					new Response(JSON.stringify(wrapped), {
+						headers: { "Content-Type": "application/json" },
+					}),
+				)
+			} catch (err) {
+				console.warn(
+					`ExpireStore "${storeName}": failed to write item "${itemName}" to CacheStorage`,
+					err,
+				)
+			}
+		}
+
+		notifyExpireStoreChange()
 		return content
 	}
 
 	const RemoveItem = async (itemName: string): Promise<void> => {
 		try {
-			const cache = await caches.open(storeName)
-			const ok = await cache.delete(requestUrl(itemName))
-			if (!ok) {
+			const db = await getExpireDb()
+			if (db) {
+				await db.delete(EXPIRE_IDB_STORE, idbKey(itemName))
+			}
+		} catch {}
+
+		if (typeof caches !== "undefined") {
+			try {
+				const cache = await caches.open(storeName)
+				await cache.delete(requestUrl(itemName))
+				await cache.delete(legacyRequestUrl(itemName))
+			} catch (err) {
 				console.warn(
-					`ExpireStore "${storeName}": item "${itemName}" not found on remove`,
+					`ExpireStore "${storeName}": error removing item "${itemName}"`,
+					err,
 				)
 			}
-		} catch (err) {
-			console.warn(
-				`ExpireStore "${storeName}": error removing item "${itemName}"`,
-				err,
-			)
-			throw err
 		}
+
+		notifyExpireStoreChange()
 	}
 
 	const Destroy = async (): Promise<void> => {
 		try {
-			const ok = await caches.delete(storeName)
-			if (!ok) {
-				console.warn(
-					`ExpireStore "${storeName}": cache not found on destroy`,
-				)
+			const db = await getExpireDb()
+			if (db) {
+				const allKeys = await db.getAllKeys(EXPIRE_IDB_STORE)
+				const prefix = `${storeName}:`
+				const tx = db.transaction(EXPIRE_IDB_STORE, "readwrite")
+				for (const k of allKeys) {
+					if (typeof k === "string" && k.startsWith(prefix)) {
+						void tx.store.delete(k)
+					}
+				}
+				await tx.done
 			}
-			expireStoreRegistry.delete(storeName)
 		} catch (err) {
-			console.warn(`ExpireStore "${storeName}": error destroying`, err)
-			throw err
+			console.warn(`ExpireStore "${storeName}": error clearing IndexedDB`, err)
 		}
+
+		if (typeof caches !== "undefined") {
+			try {
+				await caches.delete(storeName)
+			} catch (err) {
+				console.warn(`ExpireStore "${storeName}": error destroying CacheStorage`, err)
+			}
+		}
+
+		notifyExpireStoreChange()
 	}
 
 	return Object.freeze({ GetItem, SetItem, RemoveItem, Destroy })
+}
+
+export async function getExpireStoreSizeBytes(
+	storeNames?: string[],
+): Promise<{ bytes: number; count: number }> {
+	const targets = new Set(
+		storeNames && storeNames.length > 0
+			? storeNames
+			: Array.from(expireStoreRegistry),
+	)
+	const seen = new Map<string, number>()
+	const encoder = new TextEncoder()
+	const now = Date.now()
+
+	try {
+		const db = await getExpireDb()
+		if (db) {
+			const allKeys = await db.getAllKeys(EXPIRE_IDB_STORE)
+			for (const rawKey of allKeys) {
+				if (typeof rawKey !== "string") continue
+				const colonIdx = rawKey.indexOf(":")
+				if (colonIdx <= 0) continue
+				const sName = rawKey.slice(0, colonIdx)
+				if (!targets.has(sName)) continue
+				const val = (await db.get(EXPIRE_IDB_STORE, rawKey)) as
+					| ExpireItem<unknown>
+					| undefined
+				if (!val || (typeof val.ExpiresAt === "number" && val.ExpiresAt < now)) {
+					continue
+				}
+				const serialized = JSON.stringify(val)
+				seen.set(rawKey, encoder.encode(serialized).byteLength + rawKey.length)
+			}
+		}
+	} catch {}
+
+	if (typeof caches !== "undefined") {
+		for (const sName of targets) {
+			try {
+				const exists =
+					typeof caches.has === "function" ? await caches.has(sName) : true
+				if (!exists) continue
+				const cache = await caches.open(sName)
+				const requests = await cache.keys()
+				for (const req of requests) {
+					let itemName = req.url
+					try {
+						const u = new URL(req.url)
+						itemName = decodeURIComponent(u.pathname.replace(/^\//, ""))
+					} catch {}
+					const fullKey = `${sName}:${itemName}`
+					if (seen.has(fullKey)) continue
+					const res = await cache.match(req)
+					if (!res) continue
+					const text = await res.text()
+					try {
+						const parsed = JSON.parse(text) as ExpireItem<unknown>
+						if (typeof parsed.ExpiresAt === "number" && parsed.ExpiresAt < now) {
+							continue
+						}
+					} catch {}
+					seen.set(fullKey, encoder.encode(text).byteLength + fullKey.length)
+				}
+			} catch {}
+		}
+	}
+
+	let totalBytes = 0
+	for (const b of seen.values()) {
+		totalBytes += b
+	}
+	return { bytes: totalBytes, count: seen.size }
 }

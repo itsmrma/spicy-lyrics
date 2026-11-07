@@ -1,3 +1,9 @@
+import {
+  GetExpireStore,
+  getExpireStoreSizeBytes,
+  onExpireStoreChange,
+} from "../../../modules/Store.ts";
+import { RetrievePackage } from "../../ImportPackage.ts";
 import Logger from "../../Logger.ts";
 import { isExperimentEnabled } from "../../experiments.ts";
 import { $geniusAccessToken, $geniusProxyUrl } from "../../stores.ts";
@@ -28,10 +34,38 @@ export interface GeniusSection {
   styleMap?: Map<SingerStyle, string>;
 }
 
+export const GENIUS_EXPIRE_STORE_NAME = "SpicyLyrics_GeniusCache_g1";
+export const GeniusExpireStore = GetExpireStore<{
+  sections: GeniusSection[];
+  timestamp: number;
+}>(GENIUS_EXPIRE_STORE_NAME, 6, {
+  Unit: "Days",
+  Duration: 30,
+});
+
 const GENIUS_CACHE = new Map<string, { sections: GeniusSection[]; timestamp: number }>();
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const GENIUS_STORAGE_PREFIX = "spicy-lyrics:genius-cache:v5:";
+const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const GENIUS_STORAGE_PREFIX = "spicy-lyrics:genius-cache:v6:";
 const LEGACY_STORAGE_PREFIX = "spicy-lyrics:genius-cache:";
+
+const geniusCacheListeners = new Set<() => void>();
+
+export function onGeniusCacheChange(cb: () => void): () => void {
+  geniusCacheListeners.add(cb);
+  const unsubStore = onExpireStoreChange(cb);
+  return () => {
+    geniusCacheListeners.delete(cb);
+    unsubStore();
+  };
+}
+
+function notifyGeniusCacheChange(): void {
+  for (const cb of geniusCacheListeners) {
+    try {
+      cb();
+    } catch {}
+  }
+}
 
 function purgeLegacyStorageCache(): void {
   try {
@@ -66,8 +100,85 @@ export function clearGeniusCache(): void {
     }
     for (const key of keysToRemove) {
       localStorage.removeItem(key);
+      try {
+        Spicetify?.LocalStorage?.remove?.(key);
+      } catch {}
     }
   } catch {}
+  void GeniusExpireStore.Destroy().catch(() => {});
+  notifyGeniusCacheChange();
+}
+
+export async function removeGeniusCacheForSong(
+  title?: string,
+  artist?: string
+): Promise<void> {
+  if (!title || !artist) return;
+  const cacheKey = `${artist.toLowerCase()} - ${title.toLowerCase()}`;
+  GENIUS_CACHE.delete(cacheKey);
+  try {
+    localStorage.removeItem(GENIUS_STORAGE_PREFIX + cacheKey);
+  } catch {}
+  try {
+    Spicetify?.LocalStorage?.remove?.(GENIUS_STORAGE_PREFIX + cacheKey);
+  } catch {}
+  try {
+    await GeniusExpireStore.RemoveItem(cacheKey);
+  } catch {}
+  notifyGeniusCacheChange();
+}
+
+export async function getGeniusCacheStats(): Promise<{
+  bytes: number;
+  count: number;
+}> {
+  const seenKeys = new Map<string, number>();
+  const encoder = new TextEncoder();
+  const now = Date.now();
+
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(GENIUS_STORAGE_PREFIX)) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.timestamp === "number" && now - parsed.timestamp > CACHE_TTL_MS) {
+          continue;
+        }
+      } catch {}
+      const cacheKey = key.slice(GENIUS_STORAGE_PREFIX.length);
+      seenKeys.set(cacheKey, encoder.encode(raw).byteLength + key.length);
+    }
+  } catch {}
+
+  for (const [cacheKey, entry] of GENIUS_CACHE) {
+    if (now - entry.timestamp > CACHE_TTL_MS) continue;
+    if (!seenKeys.has(cacheKey)) {
+      const raw = JSON.stringify(entry);
+      seenKeys.set(cacheKey, encoder.encode(raw).byteLength + cacheKey.length);
+    }
+  }
+
+  try {
+    const idbStats = await getExpireStoreSizeBytes([GENIUS_EXPIRE_STORE_NAME]);
+    if (idbStats.count > seenKeys.size) {
+      return {
+        bytes: Math.max(
+          idbStats.bytes,
+          Array.from(seenKeys.values()).reduce((a, b) => a + b, 0)
+        ),
+        count: Math.max(idbStats.count, seenKeys.size),
+      };
+    }
+  } catch {}
+
+  let totalBytes = 0;
+  for (const b of seenKeys.values()) {
+    totalBytes += b;
+  }
+  return { bytes: totalBytes, count: seenKeys.size };
 }
 
 $geniusProxyUrl.listen(() => clearGeniusCache());
@@ -144,11 +255,34 @@ function decodeHtmlEntities(str: string): string {
     .replace(/[\u2005\u205f\u00a0]/g, " ");
 }
 
+const SINGER_DELIMITER_CHARS = new Set([
+  ",",
+  "&",
+  "+",
+  "/",
+  ";",
+  "、",
+  "､",
+  "，",
+  "・",
+  "･",
+  "＆",
+  "＋",
+  "／",
+  "；",
+]);
+
+const SINGER_SPLIT_RE =
+  /\s*(?:[,&+/;、､，・･＆＋／；]|\s+(?:and|with|feat\.?|featuring|ft\.?|vs\.?)\s+)\s*/i;
+
 function cleanName(n: string): string {
   return decodeHtmlEntities(n)
     .replace(/<[^>]+>/g, "")
     .replace(/[*_~`]/g, "")
-    .replace(/^[,\s&+/()-]+|[,\s&+/()-]+$/g, "")
+    .replace(
+      /^[,\s&+/();、､，・･＆＋／；()-]+|[,\s&+/();、､，・･＆＋／；()-]+$/g,
+      ""
+    )
     .trim();
 }
 
@@ -166,10 +300,10 @@ export function mergeSingerNames(names: Array<string | null | undefined>): strin
   const result: string[] = [];
   for (const raw of names) {
     if (!raw) continue;
-    const parts = raw.split(/\s*[,&+/]\s*|\s+(?:and|with|feat\.?|ft\.?)\s+/i);
+    const parts = raw.split(SINGER_SPLIT_RE);
     for (const p of parts) {
       const c = cleanName(p);
-      if (!c || /^(and|with|feat|ft)$/i.test(c)) continue;
+      if (!c || /^(and|with|feat|featuring|ft|vs)$/i.test(c)) continue;
       const key = c.toLowerCase();
       if (!seen.has(key)) {
         seen.add(key);
@@ -322,10 +456,17 @@ export function parseSingerHeader(rawHeader: string): {
   styleMap: Map<SingerStyle, string>;
   singers: string[];
   hasExplicitStyles: boolean;
+  collectiveTokens?: Array<{ style: SingerStyle; inParen: boolean }>;
 } {
   const styleMap = new Map<SingerStyle, string>();
   if (isMetadataHeader(rawHeader)) {
-    return { sectionSinger: null, styleMap, singers: [], hasExplicitStyles: false };
+    return {
+      sectionSinger: null,
+      styleMap,
+      singers: [],
+      hasExplicitStyles: false,
+      collectiveTokens: [],
+    };
   }
 
   let singerString = "";
@@ -485,7 +626,7 @@ export function parseSingerHeader(rawHeader: string): {
       flushToken();
       parenDepth = Math.max(0, parenDepth - 1);
       curInParen = parenDepth > 0;
-    } else if (c.ch === "," || c.ch === "&" || c.ch === "+" || c.ch === "/" || c.ch === ";") {
+    } else if (SINGER_DELIMITER_CHARS.has(c.ch)) {
       flushToken();
     } else {
       curChars.push(c);
@@ -523,7 +664,11 @@ export function parseSingerHeader(rawHeader: string): {
       }
     }
 
-    if (/^(?:both|all|together|everyone|tutti|todos|tous|全員|みんな)$/i.test(rawName)) {
+    if (
+      /^(?:both|all|together|everyone|everybody|tutti|todos|tous|全員|全|みんな|一同|合唱|합창|모두|전체)$/i.test(
+        rawName
+      )
+    ) {
       collectiveTokens.push({ style, inParen: tok.inParen });
       continue;
     }
@@ -563,6 +708,7 @@ export function parseSingerHeader(rawHeader: string): {
     styleMap,
     singers: cleanList,
     hasExplicitStyles,
+    collectiveTokens,
   };
 }
 
@@ -573,19 +719,55 @@ function hasCjkScript(str: string | null | undefined): boolean {
   return !!str && CJK_SCRIPT_RE.test(str);
 }
 
+const KNOWN_CJK_ARTISTS: ReadonlyArray<[string, string]> = [
+  ["初音ミク", "Hatsune Miku"],
+  ["重音テト", "Kasane Teto"],
+  ["鏡音リン", "Kagamine Rin"],
+  ["鏡音レン", "Kagamine Len"],
+  ["巡音ルカ", "Megurine Luka"],
+  ["音街ウナ", "Otomachi Una"],
+  ["可不", "KAFU"],
+  ["星界", "SEKAI"],
+  ["裏命", "RIME"],
+  ["狐子", "COKO"],
+  ["羽累", "HARU"],
+  ["花隈千冬", "Hanakuma Chifuyu"],
+  ["夏色花梨", "Natsuki Karin"],
+  ["小春六花", "Koharu Rikka"],
+  ["弦巻マキ", "Tsurumaki Maki"],
+  ["結月ゆかり", "Yuzuki Yukari"],
+  ["紲星あかり", "Kizuna Akari"],
+  ["神威がくぽ", "Kamui Gakupo"],
+  ["歌愛ユキ", "Kaai Yuki"],
+  ["氷山キヨテル", "Hiyama Kiyoteru"],
+  ["猫村いろは", "Nekomura Iroha"],
+  ["洛天依", "Luo Tianyi"],
+  ["言和", "Yanhe"],
+  ["乐正绫", "Yuezheng Ling"],
+  ["ずんだもん", "Zundamon"],
+  ["四国めたん", "Shikoku Metan"],
+  ["足立レイ", "Adachi Rei"],
+  ["琴葉茜", "Kotonoha Akane"],
+  ["琴葉葵", "Kotonoha Aoi"],
+];
+
 /**
  * Extracts CJK <-> Romanized artist name pairs from Genius page metadata, titles,
  * and headers (e.g. `中島健人 (Kento Nakajima)`, `キタニタツヤ (Tatsuya Kitani)`, `SOYEON (소연)`).
  */
 export function extractRomanizedArtistMap(textOrHtml: string): Map<string, string> {
   const map = new Map<string, string>();
+  for (const [cjk, rom] of KNOWN_CJK_ARTISTS) {
+    map.set(cjk.toLowerCase(), rom);
+  }
   if (!textOrHtml) return map;
 
   const plain = decodeHtmlEntities(textOrHtml)
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ");
 
-  const pairRe = /([^\s,()&+/;<>[\]「」『』—–-]+(?:\s+[^\s,()&+/;<>[\]「」『』—–-]+)*)\s*[（(]([^()（）<>[\]]+)[)）]/g;
+  const pairRe =
+    /([^\s,()&+/;、､，・･＆＋／；<>[\]「」『』—–-]+(?:\s+[^\s,()&+/;、､，・･＆＋／；<>[\]「」『』—–-]+)*)\s*[（(]([^()（）<>[\]]+)[)）]/g;
   const ignoreInnerRe =
     /^(?:romanized|english\s+translation|translation|lyrics|live|ver\.?|version|remix|ost|instrumental|feat\.?|ft\.?)$/i;
 
@@ -613,7 +795,7 @@ function romanizeSingerField(
   if (romanizedMap.size === 0) return singer;
 
   const parts = singer
-    .split(/\s*[,&+/]\s*|\s+(?:and|with|feat\.?|ft\.?)\s+/i)
+    .split(SINGER_SPLIT_RE)
     .map((p) => cleanName(p))
     .filter(Boolean);
 
@@ -750,6 +932,7 @@ export function parseGeniusLyrics(
     styleMap: Map<SingerStyle, string>;
     singers: string[];
     hasExplicitStyles: boolean;
+    collectiveTokens: Array<{ style: SingerStyle; inParen: boolean }>;
     rawLines: Array<{ segments: Segment[]; fullText: string }>;
   }
 
@@ -760,6 +943,7 @@ export function parseGeniusLyrics(
     styleMap: new Map(),
     singers: [],
     hasExplicitStyles: false,
+    collectiveTokens: [],
     rawLines: [],
   };
 
@@ -772,7 +956,7 @@ export function parseGeniusLyrics(
       if (isMetadataHeader(innerPlain)) {
         continue;
       }
-      if (currentRawSection.rawLines.length > 0 || currentRawSection.singer) {
+      if (currentRawSection.rawLines.length > 0 || currentRawSection.singer || currentRawSection.collectiveTokens.length > 0) {
         rawSections.push(currentRawSection);
       }
       const openIdx = styledHtml.indexOf("[");
@@ -782,7 +966,7 @@ export function parseGeniusLyrics(
           ? styledHtml.slice(openIdx + 1, closeIdx).trim()
           : innerPlain;
 
-      const { sectionSinger, styleMap, singers, hasExplicitStyles } =
+      const { sectionSinger, styleMap, singers, hasExplicitStyles, collectiveTokens } =
         parseSingerHeader(innerStyled);
       currentRawSection = {
         header: cleanHeaderTitle(innerPlain),
@@ -790,6 +974,7 @@ export function parseGeniusLyrics(
         styleMap,
         singers,
         hasExplicitStyles,
+        collectiveTokens: collectiveTokens ?? [],
         rawLines: [],
       };
     } else {
@@ -797,8 +982,44 @@ export function parseGeniusLyrics(
     }
   }
 
-  if (currentRawSection.rawLines.length > 0 || currentRawSection.singer) {
+  if (currentRawSection.rawLines.length > 0 || currentRawSection.singer || currentRawSection.collectiveTokens.length > 0) {
     rawSections.push(currentRawSection);
+  }
+
+  // Collect all unique singers across the entire song so collective headers like
+  // [Chorus: GUMI, <i>All</i>], [Outro: All, <i>Hatsune Miku</i>], or [Chorus: All]
+  // expand "All" to all singers in the song when fewer than 2 individual singers are in that header.
+  const allSongSingers: string[] = [];
+  const seenSongSingers = new Set<string>();
+  for (const sec of rawSections) {
+    for (const s of sec.singers) {
+      const norm = cleanName(s);
+      if (!norm) continue;
+      const key = norm.toLowerCase();
+      if (!seenSongSingers.has(key)) {
+        seenSongSingers.add(key);
+        allSongSingers.push(norm);
+      }
+    }
+  }
+
+  if (allSongSingers.length >= 2) {
+    const allSongCombined = allSongSingers.join(" & ");
+    for (const sec of rawSections) {
+      if (sec.collectiveTokens.length > 0 && sec.singers.length < 2) {
+        sec.singer = mergeSingerNames([...sec.singers, allSongCombined]);
+        if (sec.hasExplicitStyles) {
+          for (const ct of sec.collectiveTokens) {
+            sec.styleMap.set(ct.style, allSongCombined);
+            if (ct.inParen && ct.style !== "paren" && !sec.styleMap.has("paren")) {
+              sec.styleMap.set("paren", allSongCombined);
+            }
+          }
+        } else {
+          sec.styleMap.set("normal", allSongCombined);
+        }
+      }
+    }
   }
 
   // Inherit section singers for generic repeated headers without colons (e.g., [Chorus] after [Chorus: Jin])
@@ -942,7 +1163,7 @@ export function parseGeniusLyrics(
         const rest = inlineMatch[2].trim();
         const isQuotedSpeech = /^["'“”‘’«»「」『』‹›„‚]/.test(rest);
         const prefixParts = prefix
-          .split(/\s*[,&+/]\s*|\s+(?:and|with|feat\.?|ft\.?)\s+/i)
+          .split(SINGER_SPLIT_RE)
           .map((p) => cleanName(p).toLowerCase())
           .filter(Boolean);
         const isKnownSingerPrefix =
@@ -1084,12 +1305,175 @@ function applyRomanizedSectionsSingers(
   romSections: GeniusSection[]
 ): GeniusSection[] {
   if (!romSections || romSections.length === 0) return baseSections;
-  // If section counts match or Romanized sections have exclusively Latin singer names,
-  // use Romanized sections directly (alignGeniusSingers matches both Text and TransliteratedText).
+
+  // Learn CJK -> Latin singer pairs from corresponding sections/styles between baseSections and romSections
+  const learnedMap = new Map<string, string>();
+  const learnFromPair = (baseSinger: string | null | undefined, romSinger: string | null | undefined) => {
+    if (!baseSinger || !romSinger) return;
+    const baseParts = baseSinger.split(SINGER_SPLIT_RE).map(cleanName).filter(Boolean);
+    const romParts = romSinger.split(SINGER_SPLIT_RE).map(cleanName).filter(Boolean);
+    if (baseParts.length === romParts.length) {
+      for (let i = 0; i < baseParts.length; i++) {
+        if (hasCjkScript(baseParts[i]) && !hasCjkScript(romParts[i]) && LATIN_SCRIPT_RE.test(romParts[i])) {
+          learnedMap.set(baseParts[i].toLowerCase(), romParts[i]);
+        }
+      }
+    }
+  };
+
+  const count = Math.min(baseSections.length, romSections.length);
+  for (let i = 0; i < count; i++) {
+    const bSec = baseSections[i];
+    const rSec = romSections[i];
+    learnFromPair(bSec.singer, rSec.singer);
+    if (bSec.styleMap && rSec.styleMap) {
+      for (const [st, bVal] of bSec.styleMap) {
+        learnFromPair(bVal, rSec.styleMap.get(st));
+      }
+    }
+  }
+
+  if (learnedMap.size > 0) {
+    for (const sec of baseSections) {
+      sec.singer = romanizeSingerField(sec.singer, learnedMap);
+      if (sec.styleMap) {
+        for (const [st, val] of sec.styleMap) {
+          const mapped = romanizeSingerField(val, learnedMap);
+          if (mapped) sec.styleMap.set(st, mapped);
+        }
+      }
+      for (const l of sec.lines) {
+        l.singer = romanizeSingerField(l.singer, learnedMap);
+        l.parenSinger = romanizeSingerField(l.parenSinger, learnedMap);
+      }
+    }
+  }
+
+  if (!sectionsHaveCjkSingers(baseSections)) {
+    return baseSections;
+  }
   if (!sectionsHaveCjkSingers(romSections)) {
     return romSections;
   }
   return baseSections;
+}
+
+function toTitleCaseWords(str: string): string {
+  return str
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map((w) => (w.length > 0 ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+async function romanizeSingleCjkToken(token: string): Promise<string> {
+  const cleaned = cleanName(token);
+  if (!cleaned || !hasCjkScript(cleaned)) return cleaned;
+
+  const known = KNOWN_CJK_ARTISTS.find(([k]) => k.toLowerCase() === cleaned.toLowerCase());
+  if (known) return known[1];
+
+  // Hangul (Korean)
+  if (/[\uac00-\ud7af]/u.test(cleaned)) {
+    try {
+      const Aromanize = (await RetrievePackage("aromanize", "1.0.0", "js")) as {
+        hangulToLatin?: (t: string, rule?: string) => string;
+      };
+      if (typeof Aromanize?.hangulToLatin === "function") {
+        const rom = Aromanize.hangulToLatin(cleaned, "rr-translit");
+        if (rom && !hasCjkScript(rom)) return toTitleCaseWords(rom);
+      }
+    } catch {}
+  }
+
+  // Japanese (Hiragana / Katakana / Kanji via Kuroshiro + Kuromoji)
+  try {
+    const { RomanizeJapaneseSyllables } = await import("../JapaneseRomanizer.ts");
+    const res = await RomanizeJapaneseSyllables([cleaned]);
+    const rom = res?.[0]?.text?.trim();
+    if (rom && !hasCjkScript(rom)) {
+      return toTitleCaseWords(rom);
+    }
+  } catch {}
+
+  // Chinese fallback (Pinyin)
+  try {
+    const pinyinPkg = (await RetrievePackage("pinyin", "4.0.0", "mjs")) as {
+      pinyin?: (
+        t: string,
+        opts?: { style?: number; segment?: boolean }
+      ) => string[][];
+      STYLE_NORMAL?: number;
+    };
+    if (typeof pinyinPkg?.pinyin === "function") {
+      const py = pinyinPkg.pinyin(cleaned, {
+        style: pinyinPkg.STYLE_NORMAL ?? 0,
+      });
+      if (Array.isArray(py) && py.length > 0) {
+        const joined = py.map((arr) => arr?.[0] ?? "").join(" ");
+        if (joined && !hasCjkScript(joined)) {
+          return toTitleCaseWords(joined);
+        }
+      }
+    }
+  } catch {}
+
+  return cleaned;
+}
+
+export async function romanizeSingerStringAsync(
+  singer: string | null | undefined,
+  memo = new Map<string, string>()
+): Promise<string | null> {
+  if (!singer) return null;
+  if (!hasCjkScript(singer)) return singer;
+
+  const parts = singer.split(SINGER_SPLIT_RE).map(cleanName).filter(Boolean);
+  const out: string[] = [];
+  for (const part of parts) {
+    if (!hasCjkScript(part)) {
+      out.push(part);
+      continue;
+    }
+    const key = part.toLowerCase();
+    let rom = memo.get(key);
+    if (!rom) {
+      rom = await romanizeSingleCjkToken(part);
+      memo.set(key, rom);
+    }
+    out.push(rom);
+  }
+  return mergeSingerNames(out);
+}
+
+async function romanizeRemainingCjkSingers(
+  sections: GeniusSection[]
+): Promise<GeniusSection[]> {
+  if (!sectionsHaveCjkSingers(sections)) return sections;
+  const memo = new Map<string, string>();
+  for (const sec of sections) {
+    if (hasCjkScript(sec.singer)) {
+      sec.singer = await romanizeSingerStringAsync(sec.singer, memo);
+    }
+    if (sec.styleMap) {
+      for (const [st, val] of sec.styleMap) {
+        if (hasCjkScript(val)) {
+          const mapped = await romanizeSingerStringAsync(val, memo);
+          if (mapped) sec.styleMap.set(st, mapped);
+        }
+      }
+    }
+    for (const line of sec.lines) {
+      if (hasCjkScript(line.singer)) {
+        line.singer = await romanizeSingerStringAsync(line.singer, memo);
+      }
+      if (hasCjkScript(line.parenSinger)) {
+        line.parenSinger = await romanizeSingerStringAsync(line.parenSinger, memo);
+      }
+    }
+  }
+  return sections;
 }
 
 /**
@@ -1100,27 +1484,50 @@ export async function fetchGeniusSections(
   artist: string
 ): Promise<GeniusSection[] | null> {
   const cacheKey = `${artist.toLowerCase()} - ${title.toLowerCase()}`;
+  const isValidCacheEntry = (
+    entry: { sections: GeniusSection[]; timestamp: number } | undefined | null
+  ): entry is { sections: GeniusSection[]; timestamp: number } =>
+    Boolean(
+      entry &&
+        Array.isArray(entry.sections) &&
+        Date.now() - entry.timestamp < CACHE_TTL_MS &&
+        entry.sections.every(
+          (s: any) => !s.lines || s.lines.length === 0 || typeof s.lines[0] !== "string"
+        ) &&
+        !sectionsHaveCjkSingers(entry.sections)
+    );
+
   const cached = GENIUS_CACHE.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+  if (isValidCacheEntry(cached)) {
     return cached.sections;
   }
 
-  // Check persistent storage
+  // Check persistent LocalStorage
   try {
-    const raw = Spicetify.LocalStorage.get(GENIUS_STORAGE_PREFIX + cacheKey);
+    const raw =
+      Spicetify?.LocalStorage?.get?.(GENIUS_STORAGE_PREFIX + cacheKey) ??
+      localStorage.getItem(GENIUS_STORAGE_PREFIX + cacheKey);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (
-        parsed &&
-        Array.isArray(parsed.sections) &&
-        Date.now() - parsed.timestamp < CACHE_TTL_MS &&
-        parsed.sections.every(
-          (s: any) => !s.lines || s.lines.length === 0 || typeof s.lines[0] !== "string"
-        )
-      ) {
+      if (isValidCacheEntry(parsed)) {
         GENIUS_CACHE.set(cacheKey, parsed);
+        void GeniusExpireStore.SetItem(cacheKey, parsed).catch(() => {});
         return parsed.sections;
       }
+    }
+  } catch {}
+
+  // Check persistent IndexedDB / CacheStorage via GeniusExpireStore
+  try {
+    const idbEntry = await GeniusExpireStore.GetItem(cacheKey);
+    if (isValidCacheEntry(idbEntry)) {
+      GENIUS_CACHE.set(cacheKey, idbEntry);
+      try {
+        const serialized = JSON.stringify(idbEntry);
+        localStorage.setItem(GENIUS_STORAGE_PREFIX + cacheKey, serialized);
+        Spicetify?.LocalStorage?.set?.(GENIUS_STORAGE_PREFIX + cacheKey, serialized);
+      } catch {}
+      return idbEntry.sections;
     }
   } catch {}
 
@@ -1128,14 +1535,20 @@ export async function fetchGeniusSections(
     const entry = { sections, timestamp: Date.now() };
     GENIUS_CACHE.set(cacheKey, entry);
     try {
-      Spicetify.LocalStorage.set(GENIUS_STORAGE_PREFIX + cacheKey, JSON.stringify(entry));
+      const serialized = JSON.stringify(entry);
+      localStorage.setItem(GENIUS_STORAGE_PREFIX + cacheKey, serialized);
+      Spicetify?.LocalStorage?.set?.(GENIUS_STORAGE_PREFIX + cacheKey, serialized);
     } catch {}
+    void GeniusExpireStore.SetItem(cacheKey, entry).catch(() => {});
+    notifyGeniusCacheChange();
   };
 
   const cleanTitle = cleanSearchTitle(title);
   const cleanArt = cleanSearchArtist(artist);
   const proxyUrl = $geniusProxyUrl.get().trim();
   const token = $geniusAccessToken.get().trim();
+
+  let foundSections: GeniusSection[] | null = null;
 
   // 1. If custom proxy URL is configured (e.g. Cloudflare Worker or local service), use it
   if (proxyUrl) {
@@ -1159,8 +1572,11 @@ export async function fetchGeniusSections(
           sections = data.sections;
         }
         if (sections && sections.some((s) => s.singer || s.lines.some((l) => l.singer))) {
-          saveToCache(sections);
-          return sections;
+          if (!sectionsHaveCjkSingers(sections)) {
+            saveToCache(sections);
+            return sections;
+          }
+          foundSections = sections;
         }
       } else {
         geniusLogger.warn("Genius proxy returned error", { status: res.status });
@@ -1198,7 +1614,7 @@ export async function fetchGeniusSections(
   };
 
   // 2. If token is provided, query Genius API for the song URL
-  if (token) {
+  if (!foundSections && token) {
     try {
       const query = `${cleanTitle} ${cleanArt}`.trim();
       const searchUrl = `https://api.genius.com/search?q=${encodeURIComponent(query)}`;
@@ -1226,8 +1642,11 @@ export async function fetchGeniusSections(
             geniusLogger.debug("Found Genius song URL", { songUrl });
             const sections = await tryScrapeSongPath(songUrl);
             if (sections) {
-              saveToCache(sections);
-              return sections;
+              if (!sectionsHaveCjkSingers(sections)) {
+                saveToCache(sections);
+                return sections;
+              }
+              foundSections = sections;
             }
           }
         }
@@ -1243,8 +1662,7 @@ export async function fetchGeniusSections(
   const slugPath = buildGeniusSlugPath(cleanArt, cleanTitle);
   const romSlugPath = buildGeniusRomanizedSlugPath(cleanArt, cleanTitle);
 
-  let foundSections: GeniusSection[] | null = null;
-  if (slugPath) {
+  if (!foundSections && slugPath) {
     foundSections = await tryScrapeSongPath(slugPath);
   }
 
@@ -1290,11 +1708,14 @@ export async function fetchGeniusSections(
         const candidates = [romHref, origHref].filter(Boolean) as string[];
         for (const candidatePath of candidates) {
           const scraped = await tryScrapeSongPath(candidatePath);
-          if (scraped && !sectionsHaveCjkSingers(scraped)) {
+          if (!scraped) continue;
+          if (!foundSections) {
             foundSections = scraped;
+          } else {
+            foundSections = applyRomanizedSectionsSingers(foundSections, scraped);
+          }
+          if (!sectionsHaveCjkSingers(foundSections)) {
             break;
-          } else if (scraped && !foundSections) {
-            foundSections = scraped;
           }
         }
       }
@@ -1302,6 +1723,7 @@ export async function fetchGeniusSections(
   }
 
   if (foundSections) {
+    foundSections = await romanizeRemainingCjkSingers(foundSections);
     saveToCache(foundSections);
     return foundSections;
   }
@@ -1659,8 +2081,8 @@ export function createSingerBadgeContainer(
 ): HTMLElement | null {
   if (!singerName) return null;
   const rawParts = singerName
-    .split(/\s*(?:,|&|\+|\band\b)\s*/i)
-    .map((s) => s.trim())
+    .split(SINGER_SPLIT_RE)
+    .map((s) => cleanName(s))
     .filter(Boolean);
   if (rawParts.length === 0) return null;
 
@@ -1806,6 +2228,30 @@ export async function enrichLyricsWithGeniusSingers(
   };
 
   if (hasExistingSingers(lyrics)) {
+    const memo = new Map<string, string>();
+    if (lyrics.Type === "Syllable" && Array.isArray(lyrics.Content)) {
+      for (const v of lyrics.Content) {
+        const s = v.Singer || v.Lead?.Singer;
+        if (s && hasCjkScript(s)) {
+          const rom = (await romanizeSingerStringAsync(s, memo)) ?? s;
+          v.Singer = rom;
+          if (v.Lead) v.Lead.Singer = rom;
+          for (const syl of v.Lead?.Syllables || []) syl.Singer = rom;
+        }
+      }
+    } else if (lyrics.Type === "Line" && Array.isArray(lyrics.Content)) {
+      for (const l of lyrics.Content) {
+        if (l.Singer && hasCjkScript(l.Singer)) {
+          l.Singer = (await romanizeSingerStringAsync(l.Singer, memo)) ?? l.Singer;
+        }
+      }
+    } else if (lyrics.Type === "Static" && Array.isArray(lyrics.Lines)) {
+      for (const l of lyrics.Lines) {
+        if (l.Singer && hasCjkScript(l.Singer)) {
+          l.Singer = (await romanizeSingerStringAsync(l.Singer, memo)) ?? l.Singer;
+        }
+      }
+    }
     geniusLogger.debug("Lyrics already carry native singer attributions");
     return true;
   }
@@ -1819,8 +2265,9 @@ export async function enrichLyricsWithGeniusSingers(
     !nonSingerBrands.test(artists[0].name) &&
     !nonSingerBrands.test(artists[1].name)
   ) {
-    const artist1 = artists[0].name;
-    const artist2 = artists[1].name;
+    const memo = new Map<string, string>();
+    const artist1 = (await romanizeSingerStringAsync(artists[0].name, memo)) ?? artists[0].name;
+    const artist2 = (await romanizeSingerStringAsync(artists[1].name, memo)) ?? artists[1].name;
     if (lyrics.Type === "Syllable" && Array.isArray(lyrics.Content)) {
       const hasOpposite = lyrics.Content.some((v: any) => v.OppositeAligned === true);
       if (hasOpposite) {
