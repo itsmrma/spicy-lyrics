@@ -148,7 +148,7 @@
   container-type: size;
   width: var(--NowBarWidth);
   left: var(--unactive-spacing);
-  transition: left 0.4s;
+  transition: left 0.4s, transform 0.4s;
 }
 
 #SpicyLyricsPage .ContentBox .NowBar:has(> .Header:not(:has(> .Timeline))) {
@@ -168,7 +168,11 @@
 }
 
 #SpicyLyricsPage.CinemaView .ContentBox .NowBar.Active {
-  transform: translateX(2.5cqw);
+  transform: translateX(-5.5cqw);
+}
+
+#SpicyLyricsPage.CinemaView .ContentBox .NowBar.RightSide.Active {
+  transform: translateX(5.5cqw);
 }
 
 #SpicyLyricsPage .ContentBox .NowBar .Header .MediaBox {

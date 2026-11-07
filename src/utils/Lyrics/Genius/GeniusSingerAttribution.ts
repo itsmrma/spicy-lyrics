@@ -1278,6 +1278,7 @@ export function createSingerBadgeContainer(
     const badge = document.createElement("span");
     badge.classList.add("SingerBadge");
     badge.textContent = label;
+    badge.title = label;
     container.appendChild(badge);
   }
 

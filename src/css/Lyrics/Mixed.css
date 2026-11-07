@@ -1372,8 +1372,12 @@
   pointer-events: none;
   user-select: none;
   width: max-content;
-  max-width: min(14cqw, calc(var(--LyricsLeftSidePadding, 18cqw) - 1em));
+  max-width: calc(var(--LyricsLeftSidePadding, 18cqw) - 0.85em);
   z-index: 2;
+}
+
+#SpicyLyricsPage.CinemaView:not(.NowBarSide__Right).SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer {
+  max-width: calc(0.7 * var(--NowBarRightSpacing, 8cqw) + 5.5cqw - 0.85em);
 }
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer.MultiSinger {
@@ -1388,6 +1392,11 @@
   right: auto;
   left: calc(100% + 0.75em);
   align-items: flex-start;
+  max-width: calc(var(--LyricsRightSidePadding, 15.5cqw) - 0.85em);
+}
+
+#SpicyLyricsPage.CinemaView.NowBarSide__Right.SpicyRenderer .LyricsContainer .LyricsContent .line.rtl:not(.OppositeAligned) .SingerBadgeContainer {
+  max-width: calc(0.7 * var(--NowBarRightSpacing, 8cqw) + 5.5cqw - 0.85em);
 }
 
 #SpicyLyricsPage.CardMode.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer,
