@@ -460,7 +460,7 @@
 #SpicyLyricsPage.SpicyRenderer .word-group {
   display: inline-flex;
   white-space: nowrap;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-start;
 }
 
@@ -1359,9 +1359,40 @@
   justify-content: flex-end;
 }
 
+/* Resolved on .LyricsContainer (whose query container is #SpicyLyricsPage) so
+   that nested size containers like .VirtualLyricsContainer don't shrink cqw/cqh. */
+@property --SL-BadgeMaxWidthLeft {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 200px;
+}
+
+@property --SL-BadgeMaxWidthRight {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 200px;
+}
+
+#SpicyLyricsPage .LyricsContainer {
+  --SL-BadgeMaxWidthLeft: calc(var(--LyricsLeftSidePadding, 20.5cqw) - 6px);
+  --SL-BadgeMaxWidthRight: calc(var(--LyricsRightSidePadding, 13cqw) - 6px);
+}
+
+#SpicyLyricsPage.CinemaView:not(.NowBarSide__Right) .LyricsContainer {
+  --SL-BadgeMaxWidthLeft: calc(
+    var(--LyricsLeftSidePadding) - (50cqw - var(--NowBarRightSpacing)) + 6cqw - 8px
+  );
+}
+
+#SpicyLyricsPage.CinemaView.NowBarSide__Right .LyricsContainer {
+  --SL-BadgeMaxWidthRight: calc(
+    var(--LyricsLeftSidePadding) - (50cqw - var(--NowBarRightSpacing)) + 6cqw - 8px
+  );
+}
+
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer {
   position: absolute;
-  right: calc(100% + 0.75em);
+  right: calc(100% + 0.48em);
   top: 50%;
   transform: translateY(-50%);
   display: flex;
@@ -1372,12 +1403,9 @@
   pointer-events: none;
   user-select: none;
   width: max-content;
-  max-width: calc(var(--LyricsLeftSidePadding, 18cqw) - 0.85em);
+  max-width: calc(var(--SL-BadgeMaxWidthLeft) - 0.48em);
+  box-sizing: border-box;
   z-index: 2;
-}
-
-#SpicyLyricsPage.CinemaView:not(.NowBarSide__Right).SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer {
-  max-width: calc(0.7 * var(--NowBarRightSpacing, 8cqw) + 5.5cqw - 0.85em);
 }
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer.MultiSinger {
@@ -1390,13 +1418,9 @@
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.rtl:not(.OppositeAligned) .SingerBadgeContainer {
   right: auto;
-  left: calc(100% + 0.75em);
+  left: calc(100% + 0.48em);
   align-items: flex-start;
-  max-width: calc(var(--LyricsRightSidePadding, 15.5cqw) - 0.85em);
-}
-
-#SpicyLyricsPage.CinemaView.NowBarSide__Right.SpicyRenderer .LyricsContainer .LyricsContent .line.rtl:not(.OppositeAligned) .SingerBadgeContainer {
-  max-width: calc(0.7 * var(--NowBarRightSpacing, 8cqw) + 5.5cqw - 0.85em);
+  max-width: calc(var(--SL-BadgeMaxWidthRight) - 0.48em);
 }
 
 #SpicyLyricsPage.CardMode.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer,
@@ -1421,6 +1445,7 @@
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadge {
   display: inline-block;
+  box-sizing: border-box;
   font-size: 0.32em;
   font-weight: 700;
   text-transform: uppercase;
