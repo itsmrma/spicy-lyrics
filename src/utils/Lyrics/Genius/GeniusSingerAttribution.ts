@@ -30,7 +30,7 @@ export interface GeniusSection {
 
 const GENIUS_CACHE = new Map<string, { sections: GeniusSection[]; timestamp: number }>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const GENIUS_STORAGE_PREFIX = "spicy-lyrics:genius-cache:v3:";
+const GENIUS_STORAGE_PREFIX = "spicy-lyrics:genius-cache:v4:";
 const LEGACY_STORAGE_PREFIX = "spicy-lyrics:genius-cache:";
 
 function purgeLegacyStorageCache(): void {
@@ -73,15 +73,56 @@ export function clearGeniusCache(): void {
 $geniusProxyUrl.listen(() => clearGeniusCache());
 $geniusAccessToken.listen(() => clearGeniusCache());
 
+const NAMED_HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  apos: "'",
+  quot: '"',
+  lt: "<",
+  gt: ">",
+  nbsp: " ",
+  rsquo: "'",
+  lsquo: "'",
+  rdquo: '"',
+  ldquo: '"',
+  ndash: "–",
+  mdash: "—",
+  hellip: "…",
+  aacute: "á",
+  eacute: "é",
+  iacute: "í",
+  oacute: "ó",
+  uacute: "ú",
+  yacute: "ý",
+  agrave: "à",
+  egrave: "è",
+  igrave: "ì",
+  ograve: "ò",
+  ugrave: "ù",
+  acirc: "â",
+  ecirc: "ê",
+  icirc: "î",
+  ocirc: "ô",
+  ucirc: "û",
+  atilde: "ã",
+  ntilde: "ñ",
+  otilde: "õ",
+  auml: "ä",
+  euml: "ë",
+  iuml: "ï",
+  ouml: "ö",
+  uuml: "ü",
+  yuml: "ÿ",
+  aring: "å",
+  aelig: "æ",
+  oelig: "œ",
+  ccedil: "ç",
+  oslash: "ø",
+  szlig: "ß",
+};
+
 function decodeHtmlEntities(str: string): string {
   if (!str) return "";
   return str
-    .replace(/&amp;/gi, "&")
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&#34;|&quot;/gi, '"')
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&nbsp;/gi, " ")
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
       const code = parseInt(hex, 16);
       return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : _;
@@ -90,6 +131,16 @@ function decodeHtmlEntities(str: string): string {
       const code = parseInt(dec, 10);
       return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : _;
     })
+    .replace(/&([a-zA-Z]+);/g, (full, name: string) => {
+      const lower = name.toLowerCase();
+      const mapped = NAMED_HTML_ENTITIES[lower];
+      if (!mapped) return full;
+      if (name[0] === name[0].toUpperCase() && name[0] !== name[0].toLowerCase()) {
+        return mapped.toUpperCase();
+      }
+      return mapped;
+    })
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
     .replace(/[\u2005\u205f\u00a0]/g, " ");
 }
 
@@ -234,25 +285,37 @@ export function computeSimilarity(aRaw: string, bRaw: string): number {
 }
 
 const genericHeaders =
-  /^(Intro|Outro|Verse|Chorus|Bridge|Hook|Pre-Chorus|Post-Chorus|Post-Bridge|Drop|Break|Interlude|Refrain|Instrumental|Solo|Skit|Part\s+[0-9IVXLCDM]+)/i;
+  /^(Intro|Introduzione|Outro|Finale|Coda|Verse|Strofa|Verso|Couplet|Strophe|Zwrotka|Куплет|Chorus|Ritornello|Estribillo|Coro|Refrain|Refrão|Refren|Припев|Nakarat|Pre-Chorus|Pre-Ritornello|Pre-Estribillo|Pré-Refrain|Pré-Refrão|Pre-Refrain|Предприпев|Post-Chorus|Post-Ritornello|Post-Estribillo|Post-Refrain|Post-Refrão|Bridge|Ponte|Puente|Pont|Бридж|Mostek|Pre-Bridge|Post-Bridge|Hook|Inciso|Stacco|Drop|Break|Breakdown|Beat\s+Switch|Interlude|Interludio|Interlúdio|Instrumental|Strumentale|Solo|Guitar\s+Solo|Skit|Spoken|Segue|Part\s+[0-9IVXLCDM]+|Parte\s+[0-9IVXLCDM]+|Partie\s+[0-9IVXLCDM]+|Section\s+[0-9IVXLCDM]+)(\s+[0-9IVXLCDM]+)?$/i;
 
 function getBaseSectionType(header: string): string | null {
   const clean = cleanHeaderTitle(header);
-  const m = genericHeaders.exec(clean);
+  const m =
+    /^(Intro|Introduzione|Outro|Finale|Coda|Verse|Strofa|Verso|Couplet|Strophe|Zwrotka|Куплет|Chorus|Ritornello|Estribillo|Coro|Refrain|Refrão|Refren|Припев|Nakarat|Pre-Chorus|Pre-Ritornello|Pre-Estribillo|Pré-Refrain|Pré-Refrão|Pre-Refrain|Предприпев|Post-Chorus|Post-Ritornello|Post-Estribillo|Post-Refrain|Post-Refrão|Bridge|Ponte|Puente|Pont|Бридж|Mostek|Pre-Bridge|Post-Bridge|Hook|Inciso|Stacco|Drop|Break|Breakdown|Interlude|Interludio|Interlúdio|Instrumental|Strumentale|Solo|Skit|Part\s+[0-9IVXLCDM]+)/i.exec(
+      clean
+    );
   return m ? m[1].toLowerCase() : null;
 }
 
 function isMetadataHeader(header: string): boolean {
   const clean = cleanHeaderTitle(header);
   return (
-    /가사|歌詞|lyrics|romanized|english translation|traduzione|traducción|paroles/i.test(clean) ||
-    /^(produced|written|composed|arranged|mixed|mastered)\s+by/i.test(clean)
+    /가사|歌詞|lyrics|romanized|romanization|english translation|translation|traduzione|traducción|tradução|übersetzung|paroles|testo\s+di|letra\s+de|songtext|tekst\s+utworu|текст\s+песни/i.test(
+      clean
+    ) ||
+    /^(?:produced|written|composed|arranged|mixed|mastered|engineered|recorded|performed|featuring|prod\.?)\b/i.test(
+      clean
+    ) ||
+    /^(?:\?+|\d+x|x\d+|non-lyric)$/i.test(clean)
   );
 }
 
 /**
  * Extracts singers and associates styles (normal, italic, bold, bold-italic, asterisk, paren)
  * from Genius section headers.
+ *
+ * Splits by singer delimiters first while tracking active HTML/markdown formatting so that
+ * adjacent or mid-word tags (e.g. `<i>S</i><i>ofía Reyes</i>` or `S<i>ofía Reyes</i>`)
+ * never fracture a single artist's name into multiple badges.
  */
 export function parseSingerHeader(rawHeader: string): {
   sectionSinger: string | null;
@@ -266,21 +329,41 @@ export function parseSingerHeader(rawHeader: string): {
   }
 
   let singerString = "";
-  const plainHeader = rawHeader.replace(/<[^>]+>/g, "").trim();
+  const plainHeader = decodeHtmlEntities(rawHeader).replace(/<[^>]+>/g, "").trim();
 
   if (plainHeader.includes(":")) {
     let colonIdx = -1;
     let inTag = false;
+    let openBold = 0;
+    let openItalic = 0;
+    const tagRe = /^<\/?(i|em|b|strong)\b[^>]*>/i;
+
     for (let i = 0; i < rawHeader.length; i++) {
-      if (rawHeader[i] === "<") inTag = true;
-      else if (rawHeader[i] === ">") inTag = false;
-      else if (!inTag && rawHeader[i] === ":") {
+      if (rawHeader[i] === "<") {
+        inTag = true;
+        const tm = tagRe.exec(rawHeader.slice(i));
+        if (tm) {
+          const fullTag = tm[0].toLowerCase();
+          const name = tm[1].toLowerCase();
+          const isClose = fullTag.startsWith("</");
+          if (name === "b" || name === "strong") {
+            openBold = isClose ? Math.max(0, openBold - 1) : openBold + 1;
+          } else {
+            openItalic = isClose ? Math.max(0, openItalic - 1) : openItalic + 1;
+          }
+        }
+      } else if (rawHeader[i] === ">") {
+        inTag = false;
+      } else if (!inTag && rawHeader[i] === ":") {
         colonIdx = i;
         break;
       }
     }
     if (colonIdx !== -1) {
-      singerString = rawHeader.slice(colonIdx + 1).trim();
+      let prefixTags = "";
+      if (openBold > 0) prefixTags += "<b>";
+      if (openItalic > 0) prefixTags += "<i>";
+      singerString = prefixTags + rawHeader.slice(colonIdx + 1).trim();
     }
   } else if (!genericHeaders.test(cleanHeaderTitle(rawHeader))) {
     singerString = rawHeader.trim();
@@ -300,68 +383,158 @@ export function parseSingerHeader(rawHeader: string): {
   const hasParen = /\([^)]+\)/.test(singerString);
   const hasExplicitStyles = hasHtml || hasAsterisk || hasParen;
 
-  if (hasExplicitStyles) {
-    let working = singerString;
+  interface StyledChar {
+    ch: string;
+    isBold: boolean;
+    isItalic: boolean;
+    isAsterisk: boolean;
+  }
 
-    // 1. Extract bold-italic HTML or ***...***
-    working = working.replace(
-      /<(?:b|strong)\b[^>]*>\s*<(?:i|em)\b[^>]*>([\s\S]*?)<\/(?:i|em)>\s*<\/(?:b|strong)>/gi,
-      (_, inner) => {
-        addStyleSinger("bold-italic", inner);
-        return " ";
+  const styledChars: StyledChar[] = [];
+  let inBold = 0;
+  let inItalic = 0;
+
+  const pushTextWithMarkdown = (text: string, bold: boolean, italic: boolean) => {
+    const mdRegex = /(\*{3}[^*]+\*{3}|\*{2}[^*]+\*{2}|\*[^*]+\*)/g;
+    let lastIdx = 0;
+    let m: RegExpExecArray | null;
+    const appendChars = (str: string, b: boolean, it: boolean, ast: boolean) => {
+      for (const ch of str) {
+        styledChars.push({ ch, isBold: b, isItalic: it, isAsterisk: ast });
       }
-    );
-    working = working.replace(
-      /<(?:i|em)\b[^>]*>\s*<(?:b|strong)\b[^>]*>([\s\S]*?)<\/(?:b|strong)>\s*<\/(?:i|em)>/gi,
-      (_, inner) => {
-        addStyleSinger("bold-italic", inner);
-        return " ";
+    };
+    while ((m = mdRegex.exec(text)) !== null) {
+      if (m.index > lastIdx) {
+        appendChars(text.slice(lastIdx, m.index), bold, italic, false);
       }
-    );
-    working = working.replace(/\*{3}([^*]+)\*{3}/g, (_, inner) => {
-      addStyleSinger("bold-italic", inner);
-      return " ";
-    });
+      const tok = m[1];
+      if (tok.startsWith("***")) {
+        appendChars(tok.slice(3, -3), true, true, false);
+      } else if (tok.startsWith("**")) {
+        appendChars(tok.slice(2, -2), true, italic, false);
+      } else {
+        appendChars(
+          tok.slice(1, -1),
+          bold,
+          hasHtml ? italic : true,
+          hasHtml
+        );
+      }
+      lastIdx = m.index + tok.length;
+    }
+    if (lastIdx < text.length) {
+      appendChars(text.slice(lastIdx), bold, italic, false);
+    }
+  };
 
-    // 2. Extract bold HTML or **...**
-    working = working.replace(/<(?:b|strong)\b[^>]*>([\s\S]*?)<\/(?:b|strong)>/gi, (_, inner) => {
-      addStyleSinger("bold", inner);
-      return " ";
-    });
-    working = working.replace(/\*{2}([^*]+)\*{2}/g, (_, inner) => {
-      addStyleSinger("bold", inner);
-      return " ";
-    });
-
-    // 3. Extract italic HTML
-    working = working.replace(/<(?:i|em)\b[^>]*>([\s\S]*?)<\/(?:i|em)>/gi, (_, inner) => {
-      addStyleSinger("italic", inner);
-      return " ";
-    });
-
-    // 4. Extract single *...* (asterisk style if HTML is also used, otherwise italic)
-    working = working.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner) => {
-      addStyleSinger(hasHtml ? "asterisk" : "italic", inner);
-      return " ";
-    });
-
-    // 5. Extract parenthetical (Artist) in header
-    working = working.replace(/\(([^)]+)\)/g, (_, inner) => {
-      addStyleSinger("paren", inner);
-      return " ";
-    });
-
-    // 6. Remaining normal text
-    const normalMerged = mergeSingerNames([working]);
-    if (normalMerged) {
-      addStyleSinger("normal", normalMerged);
+  const headerTokenRe = /(<\/?(?:i|em|b|strong)\b[^>]*>)|(<[^>]+>)|([^<>]+)/gi;
+  let hm: RegExpExecArray | null;
+  while ((hm = headerTokenRe.exec(singerString)) !== null) {
+    if (hm[1]) {
+      const t = hm[1].toLowerCase();
+      if (t.startsWith("<i") || t.startsWith("<em")) inItalic++;
+      else if (t.startsWith("</i") || t.startsWith("</em")) inItalic = Math.max(0, inItalic - 1);
+      else if (t.startsWith("<b") || t.startsWith("<strong")) inBold++;
+      else if (t.startsWith("</b") || t.startsWith("</strong")) inBold = Math.max(0, inBold - 1);
+    } else if (hm[3]) {
+      pushTextWithMarkdown(decodeHtmlEntities(hm[3]), inBold > 0, inItalic > 0);
     }
   }
 
-  const allSingersMerged = mergeSingerNames([
-    singerString.replace(/<[^>]+>/g, " ").replace(/[*()]/g, " "),
-  ]);
-  const cleanList = allSingersMerged ? allSingersMerged.split(" & ") : [];
+  interface SingerToken {
+    chars: StyledChar[];
+    inParen: boolean;
+  }
+
+  const tokens: SingerToken[] = [];
+  let curChars: StyledChar[] = [];
+  let parenDepth = 0;
+  let curInParen = false;
+
+  const flushToken = () => {
+    if (curChars.length > 0) {
+      tokens.push({ chars: curChars, inParen: curInParen });
+      curChars = [];
+    }
+    curInParen = parenDepth > 0;
+  };
+
+  const plainJoined = styledChars.map((c) => c.ch).join("");
+  const wordDelimiterSpans: Array<[number, number]> = [];
+  const wordDelimRe = /\s+(?:and|with|feat\.?|featuring|ft\.?|vs\.?)\s+/gi;
+  let wm: RegExpExecArray | null;
+  while ((wm = wordDelimRe.exec(plainJoined)) !== null) {
+    wordDelimiterSpans.push([wm.index, wm.index + wm[0].length]);
+  }
+
+  let charIdx = 0;
+  while (charIdx < styledChars.length) {
+    const span = wordDelimiterSpans.find(([start]) => start === charIdx);
+    if (span) {
+      flushToken();
+      charIdx = span[1];
+      continue;
+    }
+
+    const c = styledChars[charIdx];
+    if (c.ch === "(" || c.ch === "（") {
+      flushToken();
+      parenDepth++;
+      curInParen = true;
+    } else if (c.ch === ")" || c.ch === "）") {
+      flushToken();
+      parenDepth = Math.max(0, parenDepth - 1);
+      curInParen = parenDepth > 0;
+    } else if (c.ch === "," || c.ch === "&" || c.ch === "+" || c.ch === "/" || c.ch === ";") {
+      flushToken();
+    } else {
+      curChars.push(c);
+    }
+    charIdx++;
+  }
+  flushToken();
+
+  const seenSingers = new Set<string>();
+  const cleanList: string[] = [];
+
+  for (const tok of tokens) {
+    const rawName = cleanName(tok.chars.map((c) => c.ch).join(""));
+    if (!rawName || /^(?:and|with|feat|featuring|ft|vs)$/i.test(rawName)) continue;
+
+    const key = rawName.toLowerCase();
+    if (!seenSingers.has(key)) {
+      seenSingers.add(key);
+      cleanList.push(rawName);
+    }
+
+    if (hasExplicitStyles) {
+      const alphaChars = tok.chars.filter((c) => /[\p{L}\p{N}]/u.test(c.ch));
+      const sample = alphaChars.length > 0 ? alphaChars : tok.chars;
+      const tokBold = sample.some((c) => c.isBold);
+      const tokItalic = sample.some((c) => c.isItalic);
+      const tokAst = sample.some((c) => c.isAsterisk);
+
+      let style: SingerStyle = "normal";
+      if (tokBold && (tokItalic || tokAst)) {
+        style = "bold-italic";
+      } else if (tokBold) {
+        style = "bold";
+      } else if (tokAst) {
+        style = hasHtml ? "asterisk" : "italic";
+      } else if (tokItalic) {
+        style = "italic";
+      } else if (tok.inParen) {
+        style = "paren";
+      }
+
+      addStyleSinger(style, rawName);
+      if (tok.inParen && style !== "paren" && !styleMap.has("paren")) {
+        addStyleSinger("paren", rawName);
+      }
+    }
+  }
+
+  const allSingersMerged = cleanList.length > 0 ? cleanList.join(" & ") : null;
 
   if (!hasExplicitStyles && cleanList.length > 0) {
     styleMap.set("normal", cleanList.join(" & "));
@@ -413,18 +586,28 @@ export function parseGeniusLyrics(textOrHtml: string): GeniusSection[] {
     const fullText = currentSegments.map((s) => s.text).join("").trim();
     if (fullText.length > 0) {
       const isBracketed = /^\[([^\]]+)\]$/.test(fullText);
-      const nonEmptySegs = currentSegments.filter((s) => s.text.trim().length > 0);
-      const allBold = isBracketed && nonEmptySegs.length > 0 && nonEmptySegs.every((s) => s.isBold);
+      const alphaSegs = currentSegments.filter((s) => /[\p{L}\p{N}]/u.test(s.text));
+      const allBold = isBracketed && alphaSegs.length > 0 && alphaSegs.every((s) => s.isBold);
       const allItalic =
-        isBracketed && nonEmptySegs.length > 0 && nonEmptySegs.every((s) => s.isItalic);
+        isBracketed && alphaSegs.length > 0 && alphaSegs.every((s) => s.isItalic);
 
-      const styledHtml = currentSegments
+      const mergedSegs: Array<{ text: string; b: boolean; it: boolean }> = [];
+      for (const s of currentSegments) {
+        const b = s.isBold && !allBold;
+        const it = s.isItalic && !allItalic;
+        const last = mergedSegs[mergedSegs.length - 1];
+        if (last && last.b === b && last.it === it) {
+          last.text += s.text;
+        } else {
+          mergedSegs.push({ text: s.text, b, it });
+        }
+      }
+
+      const styledHtml = mergedSegs
         .map((s) => {
-          const b = s.isBold && !allBold;
-          const it = s.isItalic && !allItalic;
-          if (b && it) return `<b><i>${s.text}</i></b>`;
-          if (b) return `<b>${s.text}</b>`;
-          if (it) return `<i>${s.text}</i>`;
+          if (s.b && s.it) return `<b><i>${s.text}</i></b>`;
+          if (s.b) return `<b>${s.text}</b>`;
+          if (s.it) return `<i>${s.text}</i>`;
           return s.text;
         })
         .join("")
@@ -556,6 +739,14 @@ export function parseGeniusLyrics(textOrHtml: string): GeniusSection[] {
     }
   }
 
+  const knownSingers = new Set<string>();
+  for (const sec of rawSections) {
+    for (const s of sec.singers) {
+      const norm = cleanName(s).toLowerCase();
+      if (norm) knownSingers.add(norm);
+    }
+  }
+
   const sections: GeniusSection[] = [];
 
   for (const sec of rawSections) {
@@ -653,19 +844,29 @@ export function parseGeniusLyrics(textOrHtml: string): GeniusSection[] {
 
       let cleanText = cleanFullText;
       let explicitLineSinger: string | null = null;
-      const inlineMatch =
-        /^([A-Za-z0-9\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\s&]+):\s*(.+)$/.exec(
-          cleanText
-        );
+      const inlineMatch = /^([^:]{1,40}):\s*(.+)$/.exec(cleanText);
       if (inlineMatch && !cleanText.startsWith("http")) {
         const prefix = inlineMatch[1].trim();
+        const rest = inlineMatch[2].trim();
+        const isQuotedSpeech = /^["'“”‘’«»「」『』‹›„‚]/.test(rest);
+        const prefixParts = prefix
+          .split(/\s*[,&+/]\s*|\s+(?:and|with|feat\.?|ft\.?)\s+/i)
+          .map((p) => cleanName(p).toLowerCase())
+          .filter(Boolean);
+        const isKnownSingerPrefix =
+          knownSingers.size > 0 &&
+          prefixParts.length > 0 &&
+          prefixParts.every((p) => knownSingers.has(p));
+
         if (
+          !isQuotedSpeech &&
+          isKnownSingerPrefix &&
           !/^(http|https|verse|chorus|bridge|hook|intro|outro|pre-chorus|post-chorus|refrain)/i.test(
             prefix
           )
         ) {
-          explicitLineSinger = prefix;
-          cleanText = inlineMatch[2].trim();
+          explicitLineSinger = mergeSingerNames([prefix]);
+          cleanText = rest;
         }
       }
 
