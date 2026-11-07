@@ -282,6 +282,8 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
         const lyricsData = JSON.parse(savedLyricsData);
         // Return the stored lyrics if the URI matches the current track URI
         if (lyricsData?.uri === uri) {
+          await enrichWithSingers(lyricsData);
+          $currentLyricsData.set(JSON.stringify(lyricsData));
           presentLyrics(lyricsData);
           return [lyricsData, 200];
         }

@@ -215,21 +215,15 @@ export function ApplyLineLyrics(data: LyricsData, UseRomanized: boolean = false)
       origElem.textContent = StripZeroWidth(line.Text);
       headerElem.appendChild(origElem);
       lineElem.appendChild(headerElem);
-
-      const mainTextElem = document.createElement("span");
-      mainTextElem.classList.add("MainText");
-      mainTextElem.textContent = StripZeroWidth(
-        PickDisplayText(line, UseRomanized)
-      );
-      lineElem.appendChild(mainTextElem);
       lineElem.classList.add("DualLine");
-    } else {
-      lineElem.appendChild(
-        document.createTextNode(
-          StripZeroWidth(PickDisplayText(line, UseRomanized))
-        )
-      );
     }
+
+    const mainTextElem = document.createElement("span");
+    mainTextElem.classList.add("MainText");
+    mainTextElem.textContent = StripZeroWidth(
+      PickDisplayText(line, UseRomanized)
+    );
+    lineElem.appendChild(mainTextElem);
 
     const nextLineStartTime = arr[index + 1]?.StartTime ?? 0;
 

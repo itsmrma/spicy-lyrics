@@ -76,6 +76,11 @@
   --LyricsRightSidePadding: 15.5cqw;
 }
 
+#SpicyLyricsPage.Exp_GeniusSingerAttribution {
+  --LyricsLeftSidePadding: 20.5cqw;
+  --LyricsRightSidePadding: 13cqw;
+}
+
 #SpicyLyricsPage:not(.SpicyRenderer) {
   --LyricsLeftSidePadding: 10cqw;
   --LyricsRightSidePadding: 8cqw;
@@ -114,6 +119,11 @@
   --LyricsRightSidePadding: calc(var(--NowBarLeftSpacing) * 0.35);
 }
 
+#SpicyLyricsPage.CinemaView:not(.CompactMode).NowBarStatus__Open {
+  --LyricsLeftSidePadding: 51cqw;
+  --LyricsRightSidePadding: 4cqw;
+}
+
 #SpicyLyricsPage:not(.Fullscreen):not(.CompactMode).NowBarStatus__Open {
   --NowBarLeftSpacing: calc(
     calc(50cqw - var(--NowBarWidth) - var(--NowBarRightSpacing)) * 0.7
@@ -148,7 +158,7 @@
   container-type: size;
   width: var(--NowBarWidth);
   left: var(--unactive-spacing);
-  transition: left 0.4s;
+  transition: left 0.4s, transform 0.4s;
 }
 
 #SpicyLyricsPage .ContentBox .NowBar:has(> .Header:not(:has(> .Timeline))) {
@@ -168,7 +178,11 @@
 }
 
 #SpicyLyricsPage.CinemaView .ContentBox .NowBar.Active {
-  transform: translateX(2.5cqw);
+  transform: translateX(-6cqw);
+}
+
+#SpicyLyricsPage.CinemaView .ContentBox .NowBar.RightSide.Active {
+  transform: translateX(6cqw);
 }
 
 #SpicyLyricsPage .ContentBox .NowBar .Header .MediaBox {

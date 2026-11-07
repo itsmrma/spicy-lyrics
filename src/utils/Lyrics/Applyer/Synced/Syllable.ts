@@ -81,10 +81,100 @@ interface LyricsData {
   styles?: Record<string, string>;
 }
 
+// Split any syllable whose text contains internal whitespace into per-word
+// syllables with proportional timing. Without this, multi-word syllables from
+// the API become a single unbreakable flex item (or wrap mid-word inside a
+// .word-group), causing premature line breaks and mid-word splits.
+const splitMultiWordSyllables = (syllables: SyllableData[]): SyllableData[] => {
+  const out: SyllableData[] = [];
+  for (const syl of syllables) {
+    const rawText = StripZeroWidth(syl.Text ?? "");
+    const trimmedText = rawText.trim();
+    const rawTranslit =
+      syl.TransliteratedText !== undefined
+        ? StripZeroWidth(syl.TransliteratedText).trim()
+        : undefined;
+
+    const textWords = trimmedText.length > 0 ? trimmedText.split(/\s+/) : [];
+    const translitWords =
+      rawTranslit && rawTranslit.length > 0 ? rawTranslit.split(/\s+/) : undefined;
+
+    const wordCount = Math.max(textWords.length, translitWords?.length ?? 0);
+    if (wordCount <= 1) {
+      out.push(syl);
+      continue;
+    }
+
+    const refWords =
+      translitWords && translitWords.length === wordCount ? translitWords : textWords;
+    const totalChars = refWords.reduce((sum, w) => sum + w.length, 0) || wordCount;
+    const start = syl.StartTime;
+    const end = syl.EndTime;
+    const duration = Math.max(0, end - start);
+
+    const textChars = Array.from(trimmedText);
+    let charCursor = 0;
+    let textCharCursor = 0;
+
+    for (let k = 0; k < wordCount; k++) {
+      const refLen = refWords[k]?.length ?? 1;
+      const isLast = k === wordCount - 1;
+      const partStart = start + duration * (charCursor / totalChars);
+      charCursor += refLen;
+      const partEnd = isLast ? end : start + duration * (charCursor / totalChars);
+
+      let partText: string;
+      let partIsPartOfWord: boolean | undefined;
+      if (textWords.length === wordCount) {
+        partText = textWords[k];
+        partIsPartOfWord = isLast ? syl.IsPartOfWord : false;
+      } else if (textWords.length === 1 && textChars.length >= wordCount) {
+        const nextTextCursor = isLast
+          ? textChars.length
+          : Math.round((charCursor / totalChars) * textChars.length);
+        partText = textChars.slice(textCharCursor, nextTextCursor).join("");
+        textCharCursor = nextTextCursor;
+        partIsPartOfWord = isLast ? syl.IsPartOfWord : true;
+      } else {
+        partText = k === 0 ? trimmedText : "";
+        partIsPartOfWord = isLast ? syl.IsPartOfWord : true;
+      }
+
+      const partTranslit =
+        translitWords && translitWords.length === wordCount
+          ? translitWords[k]
+          : k === 0
+            ? rawTranslit
+            : undefined;
+
+      const partRomanizedIsPartOfWord =
+        translitWords && translitWords.length === wordCount
+          ? isLast
+            ? (syl.RomanizedIsPartOfWord ?? syl.IsPartOfWord)
+            : false
+          : isLast
+            ? syl.RomanizedIsPartOfWord
+            : false;
+
+      out.push({
+        ...syl,
+        Text: partText,
+        ...(partTranslit !== undefined ? { TransliteratedText: partTranslit } : {}),
+        StartTime: partStart,
+        EndTime: partEnd,
+        IsPartOfWord: partIsPartOfWord,
+        RomanizedIsPartOfWord: partRomanizedIsPartOfWord,
+      });
+    }
+  }
+  return out;
+};
+
 // Joined before the empty parts are dropped, so a separator between two words
 // still ends the run and they aren't joined across it.
 const renderableSyllables = (syllables: SyllableData[]): SyllableData[] => {
-  const parts = $joinSplitWords.get() ? JoinSplitWords(syllables) : syllables;
+  const split = splitMultiWordSyllables(syllables);
+  const parts = $joinSplitWords.get() ? JoinSplitWords(split) : split;
   return parts.filter(HasRenderableText);
 };
 
@@ -304,11 +394,12 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
           : lead.IsPartOfWord;
 
       let origWord: HTMLSpanElement | null = null;
-      if (origElem) {
+      const origText = StripZeroWidth(lead.Text);
+      if (origElem && origText.length > 0) {
         origWord = document.createElement("span");
         origWord.classList.add("orig-word");
-        origWord.textContent = StripZeroWidth(lead.Text);
-        if (leadIsPartOfWord) {
+        origWord.textContent = origText;
+        if (lead.IsPartOfWord) {
           origWord.classList.add("PartOfWord");
         }
         origElem.appendChild(origWord);
@@ -465,11 +556,12 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
               : bw.IsPartOfWord;
 
           let bgOrigWord: HTMLSpanElement | null = null;
-          if (bgOrigElem) {
+          const bgOrigText = StripZeroWidth(bw.Text);
+          if (bgOrigElem && bgOrigText.length > 0) {
             bgOrigWord = document.createElement("span");
             bgOrigWord.classList.add("orig-word");
-            bgOrigWord.textContent = StripZeroWidth(bw.Text);
-            if (bwIsPartOfWord) {
+            bgOrigWord.textContent = bgOrigText;
+            if (bw.IsPartOfWord) {
               bgOrigWord.classList.add("PartOfWord");
             }
             bgOrigElem.appendChild(bgOrigWord);
