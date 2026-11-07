@@ -94,15 +94,6 @@ export function ApplyStaticLyrics(data: StaticLyricsData, UseRomanized: boolean 
     const showSinger =
       isExperimentEnabled("geniusSingerAttribution") && !!line.Singer;
 
-    const singerStyle = (line as any).SingerStyle;
-    if (singerStyle === "italic") {
-      lineElem.classList.add("ItalicLine");
-    } else if (singerStyle === "bold") {
-      lineElem.classList.add("BoldLine");
-    } else if (singerStyle === "bold-italic") {
-      lineElem.classList.add("BoldItalicLine");
-    }
-
     if (showSinger && line.Singer) {
       const singerContainer = document.createElement("div");
       singerContainer.classList.add("SingerBadgeContainer");
@@ -110,7 +101,6 @@ export function ApplyStaticLyrics(data: StaticLyricsData, UseRomanized: boolean 
       for (const name of singerNames) {
         const singerElem = document.createElement("span");
         singerElem.classList.add("SingerBadge");
-        if (singerStyle) singerElem.classList.add(singerStyle);
         singerElem.textContent = name.trim();
         singerContainer.appendChild(singerElem);
       }

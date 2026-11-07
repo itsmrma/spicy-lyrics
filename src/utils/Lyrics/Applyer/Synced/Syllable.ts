@@ -265,17 +265,8 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
       );
 
     const singerName = line.Singer || line.Lead.Singer;
-    const singerStyle = (line as any).SingerStyle || (line.Lead as any)?.SingerStyle;
     const showSinger =
       isExperimentEnabled("geniusSingerAttribution") && !!singerName;
-
-    if (singerStyle === "italic") {
-      lineElem.classList.add("ItalicLine");
-    } else if (singerStyle === "bold") {
-      lineElem.classList.add("BoldLine");
-    } else if (singerStyle === "bold-italic") {
-      lineElem.classList.add("BoldItalicLine");
-    }
 
     if (showSinger && singerName) {
       const singerContainer = document.createElement("div");
@@ -284,7 +275,6 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
       for (const name of singerNames) {
         const singerElem = document.createElement("span");
         singerElem.classList.add("SingerBadge");
-        if (singerStyle) singerElem.classList.add(singerStyle);
         singerElem.textContent = name.trim();
         singerContainer.appendChild(singerElem);
       }
@@ -440,17 +430,8 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
           );
 
         const bgSingerName = bg.Singer || line.Singer;
-        const bgSingerStyle = (bg as any).SingerStyle || (line as any).SingerStyle;
         const showBgSinger =
           isExperimentEnabled("geniusSingerAttribution") && !!bgSingerName;
-
-        if (bgSingerStyle === "italic") {
-          lineE.classList.add("ItalicLine");
-        } else if (bgSingerStyle === "bold") {
-          lineE.classList.add("BoldLine");
-        } else if (bgSingerStyle === "bold-italic") {
-          lineE.classList.add("BoldItalicLine");
-        }
 
         if (showBgSinger && bgSingerName) {
           const singerContainer = document.createElement("div");
@@ -459,7 +440,6 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
           for (const name of singerNames) {
             const singerElem = document.createElement("span");
             singerElem.classList.add("SingerBadge");
-            if (bgSingerStyle) singerElem.classList.add(bgSingerStyle);
             singerElem.textContent = name.trim();
             singerContainer.appendChild(singerElem);
           }
