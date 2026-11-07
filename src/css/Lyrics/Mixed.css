@@ -1529,6 +1529,7 @@
   letter-spacing: 0.02em;
   opacity: 0.65;
   color: rgba(255, 255, 255, 0.85);
+  -webkit-text-fill-color: currentColor;
   pointer-events: none;
   user-select: none;
   transition: opacity 0.25s ease, color 0.25s ease;
@@ -1562,6 +1563,7 @@
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.Active .OriginalScript {
   opacity: 0.95;
+  color: rgba(255, 255, 255, 0.95);
 }
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.Active .OriginalScript .orig-word {

@@ -30,7 +30,7 @@ export interface GeniusSection {
 
 const GENIUS_CACHE = new Map<string, { sections: GeniusSection[]; timestamp: number }>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const GENIUS_STORAGE_PREFIX = "spicy-lyrics:genius-cache:v4:";
+const GENIUS_STORAGE_PREFIX = "spicy-lyrics:genius-cache:v5:";
 const LEGACY_STORAGE_PREFIX = "spicy-lyrics:genius-cache:";
 
 function purgeLegacyStorageCache(): void {
@@ -496,17 +496,13 @@ export function parseSingerHeader(rawHeader: string): {
 
   const seenSingers = new Set<string>();
   const cleanList: string[] = [];
+  const collectiveTokens: Array<{ style: SingerStyle; inParen: boolean }> = [];
 
   for (const tok of tokens) {
     const rawName = cleanName(tok.chars.map((c) => c.ch).join(""));
     if (!rawName || /^(?:and|with|feat|featuring|ft|vs)$/i.test(rawName)) continue;
 
-    const key = rawName.toLowerCase();
-    if (!seenSingers.has(key)) {
-      seenSingers.add(key);
-      cleanList.push(rawName);
-    }
-
+    let style: SingerStyle = "normal";
     if (hasExplicitStyles) {
       const alphaChars = tok.chars.filter((c) => /[\p{L}\p{N}]/u.test(c.ch));
       const sample = alphaChars.length > 0 ? alphaChars : tok.chars;
@@ -514,7 +510,6 @@ export function parseSingerHeader(rawHeader: string): {
       const tokItalic = sample.some((c) => c.isItalic);
       const tokAst = sample.some((c) => c.isAsterisk);
 
-      let style: SingerStyle = "normal";
       if (tokBold && (tokItalic || tokAst)) {
         style = "bold-italic";
       } else if (tokBold) {
@@ -526,10 +521,33 @@ export function parseSingerHeader(rawHeader: string): {
       } else if (tok.inParen) {
         style = "paren";
       }
+    }
 
+    if (/^(?:both|all|together|everyone|tutti|todos|tous|全員|みんな)$/i.test(rawName)) {
+      collectiveTokens.push({ style, inParen: tok.inParen });
+      continue;
+    }
+
+    const key = rawName.toLowerCase();
+    if (!seenSingers.has(key)) {
+      seenSingers.add(key);
+      cleanList.push(rawName);
+    }
+
+    if (hasExplicitStyles) {
       addStyleSinger(style, rawName);
       if (tok.inParen && style !== "paren" && !styleMap.has("paren")) {
         addStyleSinger("paren", rawName);
+      }
+    }
+  }
+
+  if (collectiveTokens.length > 0 && cleanList.length > 0) {
+    const allCombined = cleanList.join(" & ");
+    for (const ct of collectiveTokens) {
+      addStyleSinger(ct.style, allCombined);
+      if (ct.inParen && ct.style !== "paren" && !styleMap.has("paren")) {
+        addStyleSinger("paren", allCombined);
       }
     }
   }
@@ -548,13 +566,87 @@ export function parseSingerHeader(rawHeader: string): {
   };
 }
 
+const CJK_SCRIPT_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/;
+const LATIN_SCRIPT_RE = /[A-Za-z]/;
+
+function hasCjkScript(str: string | null | undefined): boolean {
+  return !!str && CJK_SCRIPT_RE.test(str);
+}
+
+/**
+ * Extracts CJK <-> Romanized artist name pairs from Genius page metadata, titles,
+ * and headers (e.g. `中島健人 (Kento Nakajima)`, `キタニタツヤ (Tatsuya Kitani)`, `SOYEON (소연)`).
+ */
+export function extractRomanizedArtistMap(textOrHtml: string): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!textOrHtml) return map;
+
+  const plain = decodeHtmlEntities(textOrHtml)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
+
+  const pairRe = /([^\s,()&+/;<>[\]「」『』—–-]+(?:\s+[^\s,()&+/;<>[\]「」『』—–-]+)*)\s*[（(]([^()（）<>[\]]+)[)）]/g;
+  const ignoreInnerRe =
+    /^(?:romanized|english\s+translation|translation|lyrics|live|ver\.?|version|remix|ost|instrumental|feat\.?|ft\.?)$/i;
+
+  let m: RegExpExecArray | null;
+  while ((m = pairRe.exec(plain)) !== null) {
+    const outer = cleanName(m[1]);
+    const inner = cleanName(m[2]);
+    if (!outer || !inner || ignoreInnerRe.test(inner) || ignoreInnerRe.test(outer)) continue;
+
+    if (hasCjkScript(outer) && LATIN_SCRIPT_RE.test(inner) && !hasCjkScript(inner)) {
+      map.set(outer.toLowerCase(), inner);
+    } else if (LATIN_SCRIPT_RE.test(outer) && !hasCjkScript(outer) && hasCjkScript(inner)) {
+      map.set(inner.toLowerCase(), outer);
+    }
+  }
+
+  return map;
+}
+
+function romanizeSingerField(
+  singer: string | null | undefined,
+  romanizedMap: Map<string, string>
+): string | null {
+  if (!singer) return null;
+  if (romanizedMap.size === 0) return singer;
+
+  const parts = singer
+    .split(/\s*[,&+/]\s*|\s+(?:and|with|feat\.?|ft\.?)\s+/i)
+    .map((p) => cleanName(p))
+    .filter(Boolean);
+
+  const mapped = parts.map((p) => romanizedMap.get(p.toLowerCase()) || p);
+  return mergeSingerNames(mapped);
+}
+
+function sectionsHaveCjkSingers(sections: GeniusSection[] | null | undefined): boolean {
+  if (!sections) return false;
+  return sections.some(
+    (sec) =>
+      hasCjkScript(sec.singer) ||
+      sec.lines.some((l) => hasCjkScript(l.singer) || hasCjkScript(l.parenSinger))
+  );
+}
+
 /**
  * Parses raw Genius lyrics text or HTML containing bracketed section/singer tags:
  * e.g. [Verse 1: Drake, <i>21 Savage</i> & <b>Travis Scott</b>], [Chorus: All]
  * Retains formatting styles (normal, italic, bold, bold-italic, asterisk, paren)
  * to attribute individual vocalists per line.
  */
-export function parseGeniusLyrics(textOrHtml: string): GeniusSection[] {
+export function parseGeniusLyrics(
+  textOrHtml: string,
+  extraRomanizedMap?: Map<string, string>
+): GeniusSection[] {
+  const romanizedMap = extractRomanizedArtistMap(textOrHtml);
+  if (extraRomanizedMap) {
+    for (const [k, v] of extraRomanizedMap) {
+      if (!romanizedMap.has(k)) romanizedMap.set(k, v);
+    }
+  }
+
   let content = textOrHtml;
   const dumbMatch = /<div id="lyrics"[^>]*>([\s\S]*?)<\/div>/i.exec(content);
   if (dumbMatch) {
@@ -936,38 +1028,68 @@ export function parseGeniusLyrics(textOrHtml: string): GeniusSection[] {
           lineSinger = sec.singer;
         }
       }
-      const parenSinger = parenResolved.singer || lineSinger;
+      const parenSinger = romanizeSingerField(parenResolved.singer || lineSinger, romanizedMap);
+      const finalLineSinger = romanizeSingerField(lineSinger, romanizedMap);
 
       parsedLines.push({
         text: cleanText,
         mainText: mainTextRaw || parenTextRaw || cleanText,
         parenText: parenTextRaw || undefined,
-        singer: lineSinger,
+        singer: finalLineSinger,
         parenSinger,
         style: lineStyle,
       });
     }
 
+    const mappedStyleMap = new Map<SingerStyle, string>();
+    for (const [st, sName] of sec.styleMap) {
+      const mapped = romanizeSingerField(sName, romanizedMap);
+      if (mapped) mappedStyleMap.set(st, mapped);
+    }
+
     sections.push({
       header: sec.header,
-      singer: sec.singer,
+      singer: romanizeSingerField(sec.singer, romanizedMap),
       lines: parsedLines,
-      styleMap: sec.styleMap,
+      styleMap: mappedStyleMap,
     });
   }
 
   return sections;
 }
 
-function buildGeniusSlugPath(artist: string, title: string): string | null {
-  const combined = `${artist} ${title}`
+function normalizeGeniusSlugCombined(artist: string, title: string): string {
+  return `${artist} ${title}`
     .replace(/&/g, " and ")
     .replace(/['’"“”.,!?()[\]{}]/g, "")
     .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "")
     .toLowerCase();
+}
+
+function buildGeniusSlugPath(artist: string, title: string): string | null {
+  const combined = normalizeGeniusSlugCombined(artist, title);
   if (!combined) return null;
   return `/${combined.charAt(0).toUpperCase()}${combined.slice(1)}-lyrics`;
+}
+
+function buildGeniusRomanizedSlugPath(artist: string, title: string): string | null {
+  const combined = normalizeGeniusSlugCombined(artist, title);
+  if (!combined) return null;
+  return `/Genius-romanizations-${combined}-romanized-lyrics`;
+}
+
+function applyRomanizedSectionsSingers(
+  baseSections: GeniusSection[],
+  romSections: GeniusSection[]
+): GeniusSection[] {
+  if (!romSections || romSections.length === 0) return baseSections;
+  // If section counts match or Romanized sections have exclusively Latin singer names,
+  // use Romanized sections directly (alignGeniusSingers matches both Text and TransliteratedText).
+  if (!sectionsHaveCjkSingers(romSections)) {
+    return romSections;
+  }
+  return baseSections;
 }
 
 /**
@@ -1119,12 +1241,69 @@ export async function fetchGeniusSections(
 
   // 3. Direct slug lookup fallback (works for standard artist-title slugs without token)
   const slugPath = buildGeniusSlugPath(cleanArt, cleanTitle);
+  const romSlugPath = buildGeniusRomanizedSlugPath(cleanArt, cleanTitle);
+
+  let foundSections: GeniusSection[] | null = null;
   if (slugPath) {
-    const sections = await tryScrapeSongPath(slugPath);
-    if (sections) {
-      saveToCache(sections);
-      return sections;
+    foundSections = await tryScrapeSongPath(slugPath);
+  }
+
+  if ((!foundSections || sectionsHaveCjkSingers(foundSections)) && romSlugPath) {
+    const romSections = await tryScrapeSongPath(romSlugPath);
+    if (romSections) {
+      foundSections = foundSections
+        ? applyRomanizedSectionsSingers(foundSections, romSections)
+        : romSections;
     }
+  }
+
+  // 4. Fallback search via dumb.bloat.cat when multi-artist slugs don't match direct artist-title slug
+  if (!foundSections || sectionsHaveCjkSingers(foundSections)) {
+    try {
+      const searchQuery = `${cleanArt} ${cleanTitle}`.trim();
+      const searchRes = await fetch(
+        `https://dumb.bloat.cat/search?q=${encodeURIComponent(searchQuery)}`
+      );
+      if (searchRes.ok) {
+        const searchHtml = await searchRes.text();
+        const hrefMatches = [
+          ...searchHtml.matchAll(/<a\s+id="search-item"\s+href="(\/[^"]+?-lyrics)"/gi),
+        ].map((m) => m[1]);
+
+        const isAltVer = (h: string) =>
+          /-(?:only|solo|instrumental|tv-size|short)-ver-lyrics$/i.test(h) &&
+          !/\b(?:only|solo|instrumental|tv\s*size|short)\b/i.test(cleanTitle);
+
+        const romHref =
+          hrefMatches.find(
+            (h) => /^\/Genius-romanizations-.*-romanized-lyrics$/i.test(h) && !isAltVer(h)
+          ) ??
+          hrefMatches.find((h) => /^\/Genius-romanizations-.*-romanized-lyrics$/i.test(h));
+        const origHref =
+          hrefMatches.find(
+            (h) => !/^\/Genius-(?:romanizations|.*-translations)-/i.test(h) && !isAltVer(h)
+          ) ??
+          hrefMatches.find(
+            (h) => !/^\/Genius-(?:romanizations|.*-translations)-/i.test(h)
+          );
+
+        const candidates = [romHref, origHref].filter(Boolean) as string[];
+        for (const candidatePath of candidates) {
+          const scraped = await tryScrapeSongPath(candidatePath);
+          if (scraped && !sectionsHaveCjkSingers(scraped)) {
+            foundSections = scraped;
+            break;
+          } else if (scraped && !foundSections) {
+            foundSections = scraped;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (foundSections) {
+    saveToCache(foundSections);
+    return foundSections;
   }
 
   if (!proxyUrl && !token) {
@@ -1148,6 +1327,19 @@ function pairSimilarity(spotifyText: string, gMain: string, gFull: string): numb
   );
 }
 
+function lineSimilarity(
+  spotifyText: string,
+  spotifyTransliterated: string | undefined,
+  gMain: string,
+  gFull: string
+): number {
+  const baseScore = pairSimilarity(spotifyText, gMain, gFull);
+  if (!spotifyTransliterated || spotifyTransliterated === spotifyText) {
+    return baseScore;
+  }
+  return Math.max(baseScore, pairSimilarity(spotifyTransliterated, gMain, gFull));
+}
+
 /**
  * Align Genius singer sections with Spotify synced lines using global monotonic
  * Dynamic Programming (handles 1-to-1 match, 1-to-2 split, and 2-to-1 merge).
@@ -1155,10 +1347,16 @@ function pairSimilarity(spotifyText: string, gMain: string, gFull: string): numb
 export function alignGeniusSingers(
   lines: Array<{
     Text: string;
+    TransliteratedText?: string;
     Singer?: string;
     SingerStyle?: SingerStyle;
     OppositeAligned?: boolean;
-    Background?: Array<{ Text: string; Singer?: string; SingerStyle?: SingerStyle }>;
+    Background?: Array<{
+      Text: string;
+      TransliteratedText?: string;
+      Singer?: string;
+      SingerStyle?: SingerStyle;
+    }>;
   }>,
   sections: GeniusSection[]
 ): boolean {
@@ -1217,15 +1415,17 @@ export function alignGeniusSingers(
   const sim2 = new Float32Array(N * M);
 
   for (let i = 0; i < N; i++) {
-    const sText = lines[validIndices[i]].Text;
+    const sLine = lines[validIndices[i]];
+    const sText = sLine.Text;
+    const sRom = sLine.TransliteratedText;
     for (let j = 0; j < M; j++) {
       const g = flatG[j];
-      sim1[i * M + j] = pairSimilarity(sText, g.mainText, g.text);
+      sim1[i * M + j] = lineSimilarity(sText, sRom, g.mainText, g.text);
       if (j > 0 && flatG[j - 1].sectionIdx === g.sectionIdx) {
         const gPrev = flatG[j - 1];
         const mergedMain = `${gPrev.mainText} ${g.mainText}`;
         const mergedFull = `${gPrev.text} ${g.text}`;
-        sim2[i * M + j] = pairSimilarity(sText, mergedMain, mergedFull);
+        sim2[i * M + j] = lineSimilarity(sText, sRom, mergedMain, mergedFull);
       }
     }
   }
@@ -1422,6 +1622,33 @@ export function joinSyllablesText(
   return out.replace(/\s+/g, " ").trim();
 }
 
+export function joinSyllablesTransliteratedText(
+  syllables:
+    | Array<{
+        Text?: string;
+        TransliteratedText?: string;
+        IsPartOfWord?: boolean;
+        RomanizedIsPartOfWord?: boolean;
+      }>
+    | undefined
+): string | undefined {
+  if (!Array.isArray(syllables) || syllables.length === 0) return undefined;
+  if (!syllables.some((s) => !!s?.TransliteratedText)) return undefined;
+  let out = "";
+  for (let i = 0; i < syllables.length; i++) {
+    const s = syllables[i];
+    const t = s?.TransliteratedText || s?.Text || "";
+    if (!t) continue;
+    out += t;
+    const partOfWord =
+      s?.RomanizedIsPartOfWord !== undefined ? s.RomanizedIsPartOfWord : s?.IsPartOfWord;
+    if (!partOfWord && i < syllables.length - 1 && !/\s$/.test(out)) {
+      out += " ";
+    }
+  }
+  return out.replace(/\s+/g, " ").trim() || undefined;
+}
+
 /**
  * Builds the `.SingerBadgeContainer` DOM element for a line's singer(s).
  * Single singers render as a single horizontal pill; multiple singers stack
@@ -1510,6 +1737,7 @@ export async function enrichLyricsWithGeniusSingers(
         const bgAdapters = Array.isArray(vocalGroup.Background)
           ? vocalGroup.Background.map((bg: any) => ({
               Text: joinSyllablesText(bg.Syllables),
+              TransliteratedText: joinSyllablesTransliteratedText(bg.Syllables),
               get Singer() {
                 return bg.Singer;
               },
@@ -1524,6 +1752,7 @@ export async function enrichLyricsWithGeniusSingers(
 
         lineAdapters.push({
           Text: joinSyllablesText(vocalGroup.Lead?.Syllables),
+          TransliteratedText: joinSyllablesTransliteratedText(vocalGroup.Lead?.Syllables),
           Background: bgAdapters,
           get Singer() {
             return vocalGroup.Singer || vocalGroup.Lead?.Singer;
