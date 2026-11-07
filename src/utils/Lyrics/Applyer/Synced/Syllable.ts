@@ -265,38 +265,40 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
       );
 
     const singerName = line.Singer || line.Lead.Singer;
+    const singerStyle = (line as any).SingerStyle || (line.Lead as any)?.SingerStyle;
     const showSinger =
       isExperimentEnabled("geniusSingerAttribution") && !!singerName;
 
-    let origElem: HTMLElement | null = null;
-    let wordsParent: HTMLElement = lineElem;
-
-    if (showSinger && singerName) {
-      const singerElem = document.createElement("span");
-      singerElem.classList.add("SingerBadge");
-      singerElem.textContent = singerName;
-      lineElem.appendChild(singerElem);
+    if (singerStyle === "italic") {
+      lineElem.classList.add("ItalicLine");
+    } else if (singerStyle === "bold") {
+      lineElem.classList.add("BoldLine");
+    } else if (singerStyle === "bold-italic") {
+      lineElem.classList.add("BoldItalicLine");
     }
 
-    if (showDual || showSinger) {
-      const lineLyrics = document.createElement("div");
-      lineLyrics.classList.add("LineLyrics");
-
-      if (showDual) {
-        const headerElem = document.createElement("div");
-        headerElem.classList.add("LineHeader");
-        origElem = document.createElement("span");
-        origElem.classList.add("OriginalScript");
-        headerElem.appendChild(origElem);
-        lineLyrics.appendChild(headerElem);
+    if (showSinger && singerName) {
+      const singerContainer = document.createElement("div");
+      singerContainer.classList.add("SingerBadgeContainer");
+      const singerNames = singerName.split(/\s*[,&]\s*/).filter(Boolean);
+      for (const name of singerNames) {
+        const singerElem = document.createElement("span");
+        singerElem.classList.add("SingerBadge");
+        if (singerStyle) singerElem.classList.add(singerStyle);
+        singerElem.textContent = name.trim();
+        singerContainer.appendChild(singerElem);
       }
+      lineElem.appendChild(singerContainer);
+    }
 
-      const lyricsWords = document.createElement("div");
-      lyricsWords.classList.add("LyricsWords");
-      lineLyrics.appendChild(lyricsWords);
-
-      lineElem.appendChild(lineLyrics);
-      wordsParent = lyricsWords;
+    let origElem: HTMLElement | null = null;
+    if (showDual) {
+      const headerElem = document.createElement("div");
+      headerElem.classList.add("LineHeader");
+      origElem = document.createElement("span");
+      origElem.classList.add("OriginalScript");
+      headerElem.appendChild(origElem);
+      lineElem.appendChild(headerElem);
       lineElem.classList.add("DualLine");
     }
 
@@ -396,7 +398,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
         if (!currentWordGroup) {
           const group = document.createElement("span");
           group.classList.add("word-group");
-          wordsParent.appendChild(group);
+          lineElem.appendChild(group);
           currentWordGroup = group;
         }
 
@@ -407,7 +409,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
         }
       } else {
         currentWordGroup = null;
-        wordsParent.appendChild(word);
+        lineElem.appendChild(word);
       }
     });
 
@@ -438,38 +440,40 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
           );
 
         const bgSingerName = bg.Singer || line.Singer;
+        const bgSingerStyle = (bg as any).SingerStyle || (line as any).SingerStyle;
         const showBgSinger =
           isExperimentEnabled("geniusSingerAttribution") && !!bgSingerName;
 
-        let bgOrigElem: HTMLElement | null = null;
-        let bgWordsParent: HTMLElement = lineE;
-
-        if (showBgSinger && bgSingerName) {
-          const singerElem = document.createElement("span");
-          singerElem.classList.add("SingerBadge");
-          singerElem.textContent = bgSingerName;
-          lineE.appendChild(singerElem);
+        if (bgSingerStyle === "italic") {
+          lineE.classList.add("ItalicLine");
+        } else if (bgSingerStyle === "bold") {
+          lineE.classList.add("BoldLine");
+        } else if (bgSingerStyle === "bold-italic") {
+          lineE.classList.add("BoldItalicLine");
         }
 
-        if (showBgDual || showBgSinger) {
-          const lineLyrics = document.createElement("div");
-          lineLyrics.classList.add("LineLyrics");
-
-          if (showBgDual) {
-            const headerElem = document.createElement("div");
-            headerElem.classList.add("LineHeader");
-            bgOrigElem = document.createElement("span");
-            bgOrigElem.classList.add("OriginalScript");
-            headerElem.appendChild(bgOrigElem);
-            lineLyrics.appendChild(headerElem);
+        if (showBgSinger && bgSingerName) {
+          const singerContainer = document.createElement("div");
+          singerContainer.classList.add("SingerBadgeContainer");
+          const singerNames = bgSingerName.split(/\s*[,&]\s*/).filter(Boolean);
+          for (const name of singerNames) {
+            const singerElem = document.createElement("span");
+            singerElem.classList.add("SingerBadge");
+            if (bgSingerStyle) singerElem.classList.add(bgSingerStyle);
+            singerElem.textContent = name.trim();
+            singerContainer.appendChild(singerElem);
           }
+          lineE.appendChild(singerContainer);
+        }
 
-          const lyricsWords = document.createElement("div");
-          lyricsWords.classList.add("LyricsWords");
-          lineLyrics.appendChild(lyricsWords);
-
-          lineE.appendChild(lineLyrics);
-          bgWordsParent = lyricsWords;
+        let bgOrigElem: HTMLElement | null = null;
+        if (showBgDual) {
+          const headerElem = document.createElement("div");
+          headerElem.classList.add("LineHeader");
+          bgOrigElem = document.createElement("span");
+          bgOrigElem.classList.add("OriginalScript");
+          headerElem.appendChild(bgOrigElem);
+          lineE.appendChild(headerElem);
           lineE.classList.add("DualLine");
         }
 
@@ -572,7 +576,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
             if (!currentBGWordGroup) {
               const group = document.createElement("span");
               group.classList.add("word-group");
-              bgWordsParent.appendChild(group);
+              lineE.appendChild(group);
               currentBGWordGroup = group;
             }
 
@@ -583,7 +587,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
             }
           } else {
             currentBGWordGroup = null;
-            bgWordsParent.appendChild(bwE);
+            lineE.appendChild(bwE);
           }
         });
       });

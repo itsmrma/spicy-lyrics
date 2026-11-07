@@ -183,6 +183,12 @@ export function ApplyLineLyrics(data: LyricsData, UseRomanized: boolean = false)
 
   content.forEach((line, index, arr) => {
     const lineElem = document.createElement("div");
+    lineElem.classList.add("line");
+
+    if (isRtl(line.Text) && !lineElem.classList.contains("rtl")) {
+      lineElem.classList.add("rtl");
+    }
+
     const showDual =
       isExperimentEnabled("dualLineRomanization") &&
       UseRomanized &&
@@ -193,45 +199,51 @@ export function ApplyLineLyrics(data: LyricsData, UseRomanized: boolean = false)
     const showSinger =
       isExperimentEnabled("geniusSingerAttribution") && !!line.Singer;
 
-    if (showDual || showSinger) {
-      if (showSinger && line.Singer) {
+    const singerStyle = (line as any).SingerStyle;
+    if (singerStyle === "italic") {
+      lineElem.classList.add("ItalicLine");
+    } else if (singerStyle === "bold") {
+      lineElem.classList.add("BoldLine");
+    } else if (singerStyle === "bold-italic") {
+      lineElem.classList.add("BoldItalicLine");
+    }
+
+    if (showSinger && line.Singer) {
+      const singerContainer = document.createElement("div");
+      singerContainer.classList.add("SingerBadgeContainer");
+      const singerNames = line.Singer.split(/\s*[,&]\s*/).filter(Boolean);
+      for (const name of singerNames) {
         const singerElem = document.createElement("span");
         singerElem.classList.add("SingerBadge");
-        singerElem.textContent = line.Singer;
-        lineElem.appendChild(singerElem);
+        if (singerStyle) singerElem.classList.add(singerStyle);
+        singerElem.textContent = name.trim();
+        singerContainer.appendChild(singerElem);
       }
+      lineElem.appendChild(singerContainer);
+    }
 
-      const lineLyrics = document.createElement("div");
-      lineLyrics.classList.add("LineLyrics");
-
-      if (showDual && line.Text) {
-        const headerElem = document.createElement("div");
-        headerElem.classList.add("LineHeader");
-        const origElem = document.createElement("span");
-        origElem.classList.add("OriginalScript");
-        origElem.textContent = StripZeroWidth(line.Text);
-        headerElem.appendChild(origElem);
-        lineLyrics.appendChild(headerElem);
-      }
+    if (showDual && line.Text) {
+      const headerElem = document.createElement("div");
+      headerElem.classList.add("LineHeader");
+      const origElem = document.createElement("span");
+      origElem.classList.add("OriginalScript");
+      origElem.textContent = StripZeroWidth(line.Text);
+      headerElem.appendChild(origElem);
+      lineElem.appendChild(headerElem);
 
       const mainTextElem = document.createElement("span");
       mainTextElem.classList.add("MainText");
       mainTextElem.textContent = StripZeroWidth(
         PickDisplayText(line, UseRomanized)
       );
-      lineLyrics.appendChild(mainTextElem);
-
-      lineElem.appendChild(lineLyrics);
+      lineElem.appendChild(mainTextElem);
       lineElem.classList.add("DualLine");
     } else {
-      lineElem.textContent = StripZeroWidth(
-        PickDisplayText(line, UseRomanized)
+      lineElem.appendChild(
+        document.createTextNode(
+          StripZeroWidth(PickDisplayText(line, UseRomanized))
+        )
       );
-    }
-    lineElem.classList.add("line");
-
-    if (isRtl(line.Text) && !lineElem.classList.contains("rtl")) {
-      lineElem.classList.add("rtl");
     }
 
     const nextLineStartTime = arr[index + 1]?.StartTime ?? 0;
