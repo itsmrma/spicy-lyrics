@@ -55,8 +55,8 @@ Upstream Japanese romanization concatenated words into continuous unspaced strin
 
 ### Genius Singer Attribution
 
-For songs performed by groups (e.g. BTS, BLACKPINK, TWICE, K/DA) or collaborations:
-- Automatically searches and fetches section-level singer tags from Genius (`[Verse 1: Jungkook]`, `[Chorus: All]`, `[Verse 1: SOYEON & Mimi Webb]`, etc.).
+For songs performed by groups (e.g. BTS) or collaborations:
+- Automatically searches and fetches section-level singer tags from Genius (`[Verse 1: Jungkook]`, `[Chorus: All]`, `[Verse 2: RM & SUGA]`, etc.).
 - **Multi-singer formatting & typography**: recognizes Genius transcription guidelines where multiple vocalists in the same section are distinguished by style (1st vocalist = standard, 2nd vocalist = italic, 3rd vocalist = bold, 4th = bold-italic). Spotify lyrics reflect the exact styling and attribute only the active singer singing at that moment.
 - **Zero-shift gutter placement**: singer badges sit in the left gutter beside the lyrics without displacing or altering the original lyrics layout and horizontal alignment. In case of multi-singer moments or long names, badges cleanly stack vertically.
 - **Persistent Caching**: once fetched, singer breakdowns are saved in persistent storage (`Spicetify.LocalStorage`) for instant 0ms loads on replay.
