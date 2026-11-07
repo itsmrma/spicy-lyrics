@@ -269,25 +269,34 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
       isExperimentEnabled("geniusSingerAttribution") && !!singerName;
 
     let origElem: HTMLElement | null = null;
+    let wordsParent: HTMLElement = lineElem;
+
+    if (showSinger && singerName) {
+      const singerElem = document.createElement("span");
+      singerElem.classList.add("SingerBadge");
+      singerElem.textContent = singerName;
+      lineElem.appendChild(singerElem);
+    }
 
     if (showDual || showSinger) {
-      const headerElem = document.createElement("div");
-      headerElem.classList.add("LineHeader");
-
-      if (showSinger && singerName) {
-        const singerElem = document.createElement("span");
-        singerElem.classList.add("SingerBadge");
-        singerElem.textContent = singerName;
-        headerElem.appendChild(singerElem);
-      }
+      const lineLyrics = document.createElement("div");
+      lineLyrics.classList.add("LineLyrics");
 
       if (showDual) {
+        const headerElem = document.createElement("div");
+        headerElem.classList.add("LineHeader");
         origElem = document.createElement("span");
         origElem.classList.add("OriginalScript");
         headerElem.appendChild(origElem);
+        lineLyrics.appendChild(headerElem);
       }
 
-      lineElem.appendChild(headerElem);
+      const lyricsWords = document.createElement("div");
+      lyricsWords.classList.add("LyricsWords");
+      lineLyrics.appendChild(lyricsWords);
+
+      lineElem.appendChild(lineLyrics);
+      wordsParent = lyricsWords;
       lineElem.classList.add("DualLine");
     }
 
@@ -295,20 +304,6 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
 
     renderableSyllables(line.Lead.Syllables).forEach((lead, iL, aL) => {
       let word = document.createElement("span");
-
-      let origWord: HTMLSpanElement | null = null;
-      if (origElem) {
-        origWord = document.createElement("span");
-        origWord.classList.add("orig-word");
-        origWord.textContent = StripZeroWidth(
-          lead.Text + (lead.IsPartOfWord || iL === aL.length - 1 ? "" : " ")
-        );
-        origElem.appendChild(origWord);
-      }
-
-      if (isRtl(lead.Text) && !lineElem.classList.contains("rtl")) {
-        lineElem.classList.add("rtl");
-      }
 
       const totalDuration = ConvertTime(lead.EndTime) - ConvertTime(lead.StartTime);
 
@@ -320,6 +315,21 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
         UseRomanized && lead.RomanizedIsPartOfWord !== undefined
           ? lead.RomanizedIsPartOfWord
           : lead.IsPartOfWord;
+
+      let origWord: HTMLSpanElement | null = null;
+      if (origElem) {
+        origWord = document.createElement("span");
+        origWord.classList.add("orig-word");
+        origWord.textContent = StripZeroWidth(lead.Text);
+        if (leadIsPartOfWord) {
+          origWord.classList.add("PartOfWord");
+        }
+        origElem.appendChild(origWord);
+      }
+
+      if (isRtl(lead.Text) && !lineElem.classList.contains("rtl")) {
+        lineElem.classList.add("rtl");
+      }
 
       // Too short to split whatever its letters: skip the grapheme split.
       const letters = totalDuration >= MinLetterCapableDuration() ? SplitLetters(leadRenderText) : [];
@@ -386,7 +396,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
         if (!currentWordGroup) {
           const group = document.createElement("span");
           group.classList.add("word-group");
-          lineElem.appendChild(group);
+          wordsParent.appendChild(group);
           currentWordGroup = group;
         }
 
@@ -397,7 +407,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
         }
       } else {
         currentWordGroup = null;
-        lineElem.appendChild(word);
+        wordsParent.appendChild(word);
       }
     });
 
@@ -432,25 +442,34 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
           isExperimentEnabled("geniusSingerAttribution") && !!bgSingerName;
 
         let bgOrigElem: HTMLElement | null = null;
+        let bgWordsParent: HTMLElement = lineE;
+
+        if (showBgSinger && bgSingerName) {
+          const singerElem = document.createElement("span");
+          singerElem.classList.add("SingerBadge");
+          singerElem.textContent = bgSingerName;
+          lineE.appendChild(singerElem);
+        }
 
         if (showBgDual || showBgSinger) {
-          const headerElem = document.createElement("div");
-          headerElem.classList.add("LineHeader");
-
-          if (showBgSinger && bgSingerName) {
-            const singerElem = document.createElement("span");
-            singerElem.classList.add("SingerBadge");
-            singerElem.textContent = bgSingerName;
-            headerElem.appendChild(singerElem);
-          }
+          const lineLyrics = document.createElement("div");
+          lineLyrics.classList.add("LineLyrics");
 
           if (showBgDual) {
+            const headerElem = document.createElement("div");
+            headerElem.classList.add("LineHeader");
             bgOrigElem = document.createElement("span");
             bgOrigElem.classList.add("OriginalScript");
             headerElem.appendChild(bgOrigElem);
+            lineLyrics.appendChild(headerElem);
           }
 
-          lineE.appendChild(headerElem);
+          const lyricsWords = document.createElement("div");
+          lyricsWords.classList.add("LyricsWords");
+          lineLyrics.appendChild(lyricsWords);
+
+          lineE.appendChild(lineLyrics);
+          bgWordsParent = lyricsWords;
           lineE.classList.add("DualLine");
         }
 
@@ -458,20 +477,6 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
 
         renderableSyllables(bg.Syllables).forEach((bw, bI, bA) => {
           let bwE = document.createElement("span");
-
-          let bgOrigWord: HTMLSpanElement | null = null;
-          if (bgOrigElem) {
-            bgOrigWord = document.createElement("span");
-            bgOrigWord.classList.add("orig-word");
-            bgOrigWord.textContent = StripZeroWidth(
-              bw.Text + (bw.IsPartOfWord || bI === bA.length - 1 ? "" : " ")
-            );
-            bgOrigElem.appendChild(bgOrigWord);
-          }
-
-          if (isRtl(bw.Text) && !lineE.classList.contains("rtl")) {
-            lineE.classList.add("rtl");
-          }
 
           const totalDuration = ConvertTime(bw.EndTime) - ConvertTime(bw.StartTime);
 
@@ -483,6 +488,21 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
             UseRomanized && bw.RomanizedIsPartOfWord !== undefined
               ? bw.RomanizedIsPartOfWord
               : bw.IsPartOfWord;
+
+          let bgOrigWord: HTMLSpanElement | null = null;
+          if (bgOrigElem) {
+            bgOrigWord = document.createElement("span");
+            bgOrigWord.classList.add("orig-word");
+            bgOrigWord.textContent = StripZeroWidth(bw.Text);
+            if (bwIsPartOfWord) {
+              bgOrigWord.classList.add("PartOfWord");
+            }
+            bgOrigElem.appendChild(bgOrigWord);
+          }
+
+          if (isRtl(bw.Text) && !lineE.classList.contains("rtl")) {
+            lineE.classList.add("rtl");
+          }
 
           // Too short to split whatever its letters: skip the grapheme split.
           const letters = totalDuration >= MinLetterCapableDuration() ? SplitLetters(bgRenderText) : [];
@@ -552,7 +572,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
             if (!currentBGWordGroup) {
               const group = document.createElement("span");
               group.classList.add("word-group");
-              lineE.appendChild(group);
+              bgWordsParent.appendChild(group);
               currentBGWordGroup = group;
             }
 
@@ -563,7 +583,7 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
             }
           } else {
             currentBGWordGroup = null;
-            lineE.appendChild(bwE);
+            bgWordsParent.appendChild(bwE);
           }
         });
       });

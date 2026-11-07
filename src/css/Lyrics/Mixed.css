@@ -1344,14 +1344,37 @@
 }
 
 /* Dual-Line Romanization & Genius Singer Badges */
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line {
+  align-items: flex-start;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .LineLyrics {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.OppositeAligned .LineLyrics {
+  align-items: flex-end;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .LyricsWords {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.OppositeAligned .LyricsWords {
+  justify-content: flex-end;
+}
+
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .LineHeader {
   width: 100%;
-  flex-basis: 100%;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.5em;
-  margin-bottom: 0.22em;
+  margin-bottom: 0.18em;
   pointer-events: none;
   user-select: none;
 }
@@ -1363,11 +1386,11 @@
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadge {
   display: inline-flex;
   align-items: center;
-  font-size: 0.44em;
+  font-size: 0.38em;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  padding: 0.22em 0.65em;
+  padding: 0.25em 0.7em;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
   color: rgba(255, 255, 255, 0.95);
@@ -1379,8 +1402,16 @@
   backdrop-filter: blur(8px);
   width: fit-content;
   flex-shrink: 0;
+  margin-top: 0.38em;
+  margin-right: 0.75em;
+  align-self: flex-start;
   opacity: 0.8;
   transition: opacity 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.OppositeAligned .SingerBadge {
+  margin-right: 0;
+  margin-left: 0.75em;
 }
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.Active .SingerBadge {
@@ -1403,7 +1434,8 @@
 }
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .OriginalScript {
-  display: inline-block;
+  display: inline-flex;
+  flex-wrap: wrap;
   font-size: 0.58em;
   font-weight: 600;
   line-height: 1.25;
@@ -1417,6 +1449,7 @@
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .OriginalScript .orig-word {
   display: inline-block;
+  white-space: pre-wrap;
   background-image: linear-gradient(
     var(--gradient-degrees, 180deg),
     rgba(255, 255, 255, var(--gradient-alpha, 0.85)) var(--gradient-position, -20%),
@@ -1429,6 +1462,11 @@
   color: transparent;
   transition: opacity 0.25s ease;
   vertical-align: baseline;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .OriginalScript .orig-word:not(.PartOfWord):not(:last-child)::after {
+  content: "";
+  margin-right: 0.32ch;
 }
 
 #SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line .OriginalScript .orig-word {

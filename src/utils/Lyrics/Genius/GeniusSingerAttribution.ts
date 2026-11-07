@@ -12,9 +12,18 @@ export interface GeniusSection {
 
 const GENIUS_CACHE = new Map<string, { sections: GeniusSection[]; timestamp: number }>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const GENIUS_STORAGE_PREFIX = "spicy-lyrics:genius-cache:";
 
 export function clearGeniusCache(): void {
   GENIUS_CACHE.clear();
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(GENIUS_STORAGE_PREFIX)) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch {}
 }
 
 $geniusProxyUrl.listen(() => clearGeniusCache());
@@ -32,7 +41,7 @@ export function cleanSearchTitle(title: string): string {
 /** Clean artist name for search */
 export function cleanSearchArtist(artist: string): string {
   return artist
-    .split(/[,&/]|(?:feat\.|featuring|with)/i)[0]
+    .split(/\s*[,&]\s*|\s+(?:feat\.|featuring|with|ft\.)\s+|\s+\/\s+/i)[0]
     .trim();
 }
 
@@ -162,6 +171,26 @@ export async function fetchGeniusSections(
     return cached.sections;
   }
 
+  // Check persistent storage
+  try {
+    const raw = Spicetify.LocalStorage.get(GENIUS_STORAGE_PREFIX + cacheKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.sections) && Date.now() - parsed.timestamp < CACHE_TTL_MS) {
+        GENIUS_CACHE.set(cacheKey, parsed);
+        return parsed.sections;
+      }
+    }
+  } catch {}
+
+  const saveToCache = (sections: GeniusSection[]) => {
+    const entry = { sections, timestamp: Date.now() };
+    GENIUS_CACHE.set(cacheKey, entry);
+    try {
+      Spicetify.LocalStorage.set(GENIUS_STORAGE_PREFIX + cacheKey, JSON.stringify(entry));
+    } catch {}
+  };
+
   const cleanTitle = cleanSearchTitle(title);
   const cleanArt = cleanSearchArtist(artist);
   const proxyUrl = $geniusProxyUrl.get().trim();
@@ -189,7 +218,7 @@ export async function fetchGeniusSections(
           sections = parseGeniusLyrics(data.html);
         }
         if (sections && sections.some((s) => s.singer)) {
-          GENIUS_CACHE.set(cacheKey, { sections, timestamp: Date.now() });
+          saveToCache(sections);
           return sections;
         }
       } else {
@@ -231,7 +260,7 @@ export async function fetchGeniusSections(
                 const html = await songRes.text();
                 const sections = parseGeniusLyrics(html);
                 if (sections.some((s) => s.singer)) {
-                  GENIUS_CACHE.set(cacheKey, { sections, timestamp: Date.now() });
+                  saveToCache(sections);
                   return sections;
                 }
               } else if (songRes.status === 403) {
@@ -359,8 +388,49 @@ export async function enrichLyricsWithGeniusSingers(
     return true;
   }
 
-  // 2. Automatic duet attribution from OppositeAligned layout and artist list
-  if (artists && artists.length >= 2) {
+  // 2. Fetch Genius sections via proxy or search
+  const sections = await fetchGeniusSections(title, artist);
+  let matched = false;
+  if (sections && sections.some((s) => s.singer)) {
+    if (lyrics.Type === "Line" && Array.isArray(lyrics.Content)) {
+      matched = alignGeniusSingers(lyrics.Content, sections);
+    } else if (lyrics.Type === "Syllable" && Array.isArray(lyrics.Content)) {
+      const lineAdapters = lyrics.Content.map((vocalGroup: any) => ({
+        Text: (vocalGroup.Lead?.Syllables || []).map((s: any) => s.Text).join(""),
+        get Singer() {
+          return vocalGroup.Singer || vocalGroup.Lead?.Singer;
+        },
+        set Singer(val: string | undefined) {
+          vocalGroup.Singer = val;
+          if (vocalGroup.Lead) vocalGroup.Lead.Singer = val;
+          for (const s of vocalGroup.Lead?.Syllables || []) {
+            s.Singer = val;
+          }
+        },
+        get OppositeAligned() {
+          return vocalGroup.OppositeAligned;
+        },
+        set OppositeAligned(val: boolean | undefined) {
+          vocalGroup.OppositeAligned = val;
+          if (vocalGroup.Lead) vocalGroup.Lead.OppositeAligned = val;
+        },
+      }));
+      matched = alignGeniusSingers(lineAdapters, sections);
+    } else if (lyrics.Type === "Static" && Array.isArray(lyrics.Lines)) {
+      matched = alignGeniusSingers(lyrics.Lines, sections);
+    }
+  }
+
+  if (matched) return true;
+
+  // 3. Fallback: only if Genius has no singer breakdown AND this is genuinely an opposite-aligned 2-artist duet
+  const nonSingerBrands = /^(League of Legends|Various Artists|Original Soundtrack|Soundtrack|Cast|Riot Games Music)$/i;
+  if (
+    artists &&
+    artists.length === 2 &&
+    !nonSingerBrands.test(artists[0].name) &&
+    !nonSingerBrands.test(artists[1].name)
+  ) {
     const artist1 = artists[0].name;
     const artist2 = artists[1].name;
     if (lyrics.Type === "Syllable" && Array.isArray(lyrics.Content)) {
@@ -393,42 +463,6 @@ export async function enrichLyricsWithGeniusSingers(
         return true;
       }
     }
-  }
-
-  // 3. Fallback to Genius sections via proxy or search
-  const sections = await fetchGeniusSections(title, artist);
-  if (!sections) return false;
-
-  if (lyrics.Type === "Line" && Array.isArray(lyrics.Content)) {
-    return alignGeniusSingers(lyrics.Content, sections);
-  }
-
-  if (lyrics.Type === "Syllable" && Array.isArray(lyrics.Content)) {
-    const lineAdapters = lyrics.Content.map((vocalGroup: any) => ({
-      Text: (vocalGroup.Lead?.Syllables || []).map((s: any) => s.Text).join(""),
-      get Singer() {
-        return vocalGroup.Singer || vocalGroup.Lead?.Singer;
-      },
-      set Singer(val: string | undefined) {
-        vocalGroup.Singer = val;
-        if (vocalGroup.Lead) vocalGroup.Lead.Singer = val;
-        for (const s of vocalGroup.Lead?.Syllables || []) {
-          s.Singer = val;
-        }
-      },
-      get OppositeAligned() {
-        return vocalGroup.OppositeAligned;
-      },
-      set OppositeAligned(val: boolean | undefined) {
-        vocalGroup.OppositeAligned = val;
-        if (vocalGroup.Lead) vocalGroup.Lead.OppositeAligned = val;
-      },
-    }));
-    return alignGeniusSingers(lineAdapters, sections);
-  }
-
-  if (lyrics.Type === "Static" && Array.isArray(lyrics.Lines)) {
-    return alignGeniusSingers(lyrics.Lines, sections);
   }
 
   return false;

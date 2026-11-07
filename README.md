@@ -55,12 +55,121 @@ Upstream Japanese romanization concatenated words into continuous unspaced strin
 
 ### Genius Singer Attribution
 
-For songs performed by groups (e.g. BTS, BLACKPINK, TWICE) or collaborations:
-- Automatically searches and fetches section-level singer tags from Genius (`[Verse 1: Jungkook]`, `[Chorus: All]`, etc.).
+For songs performed by groups (e.g. BTS, BLACKPINK, TWICE, K/DA) or collaborations:
+- Automatically searches and fetches section-level singer tags from Genius (`[Verse 1: Jungkook]`, `[Chorus: All]`, `[Verse 1: SOYEON & Mimi Webb]`, etc.).
 - Robust similarity alignment matches the synced playback timeline to the corresponding singer parts.
-- Displays sleek singer badges on each line.
-- Two-singer duets automatically align to opposite sides for an intuitive duet layout.
+- Displays sleek pill badges placed beside the lyrics text on the left, with duet lines symmetrically aligned.
+- **Persistent Caching**: once fetched, singer breakdowns are saved in persistent storage (`Spicetify.LocalStorage`) for instant 0ms loads on replay.
 - Can be toggled in **Settings → Experiments** (`Genius Singer Attribution`).
+
+#### Setting up the Cloudflare Worker Proxy
+
+Because `genius.com` blocks direct automated scraper requests with Cloudflare bot challenges (`403 Forbidden`), a free Cloudflare Worker fetches the lyrics through clean mirror instances without anti-bot blocks:
+
+1. Create a free worker on [dash.cloudflare.com](https://dash.cloudflare.com/) (**Workers & Pages** → **Create Application** → **Create Worker**).
+2. Click **Edit code** and paste the following snippet:
+
+```javascript
+export default {
+  async fetch(request, env) {
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "*",
+        },
+      });
+    }
+
+    const url = new URL(request.url);
+    const title = url.searchParams.get("title");
+    const artist = url.searchParams.get("artist");
+
+    if (!title) {
+      return new Response(JSON.stringify({ error: "Missing title parameter" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+
+    const token =
+      request.headers.get("Authorization")?.replace("Bearer ", "") ||
+      env.GENIUS_TOKEN ||
+      "";
+
+    let songPath = null;
+
+    if (token) {
+      try {
+        const searchRes = await fetch(
+          `https://api.genius.com/search?q=${encodeURIComponent(title + " " + (artist || ""))}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (searchRes.ok) {
+          const data = await searchRes.json();
+          const hits = data?.response?.hits;
+          if (hits && hits.length > 0) {
+            const hit =
+              hits.find(
+                (h) =>
+                  h.result?.primary_artist?.name?.toLowerCase().includes((artist || "").toLowerCase())
+              ) || hits[0];
+            songPath = hit?.result?.path;
+          }
+        }
+      } catch (e) {}
+    }
+
+    const mirrors = [
+      "https://dumb.bloat.cat",
+      "https://dumb.jeikobu.net",
+      "https://dumb.ducks.party",
+    ];
+
+    const cleanTitle = title.replace(/\s*-\s*.*$/g, "").trim();
+    const query = encodeURIComponent(`${cleanTitle} ${artist || ""}`.trim());
+
+    for (const mirror of mirrors) {
+      try {
+        let path = songPath;
+        if (!path) {
+          const searchRes = await fetch(`${mirror}/search?q=${query}`, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+          });
+          if (!searchRes.ok) continue;
+          const searchHtml = await searchRes.text();
+          const match = /<a id="search-item" href="(\/[^"]+-lyrics)"/i.exec(searchHtml);
+          if (!match) continue;
+          path = match[1];
+        }
+
+        const pageRes = await fetch(`${mirror}${path}`, {
+          headers: { "User-Agent": "Mozilla/5.0" },
+        });
+        if (!pageRes.ok) continue;
+        const pageHtml = await pageRes.text();
+
+        return new Response(JSON.stringify({ html: pageHtml, path }), {
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      } catch (err) {}
+    }
+
+    return new Response(JSON.stringify({ error: "Lyrics not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    });
+  },
+};
+```
+
+3. Click **Deploy**.
+4. Test in your browser: `https://<your-worker>.workers.dev/?title=Butter&artist=BTS` (returns JSON lyrics).
+5. In Spotify, paste your Worker URL (`https://<your-worker>.workers.dev`) into **Settings → Lyrics → Genius Proxy URL**.
 
 ## Installation
 
