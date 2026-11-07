@@ -81,6 +81,22 @@ export const EXPERIMENTS = [
     pageClass: "Exp_PerformanceMode",
   },
   {
+    id: "dualLineRomanization",
+    label: "Dual-Line Romanization",
+    description:
+      "Shows the original script in small font above and the romanized text below (YouTube Music style). Turning this off restores the single-line romanized view.",
+    default: true,
+    pageClass: "Exp_DualLineRomanization",
+  },
+  {
+    id: "geniusSingerAttribution",
+    label: "Genius Singer Attribution",
+    description:
+      "Identifies and displays singer names for songs by groups and collaborations using Genius. Turning this off hides singer badges.",
+    default: true,
+    pageClass: "Exp_GeniusSingerAttribution",
+  },
+  {
     id: "newProgressBarStyling",
     label: "New SliderBar Styling",
     description:

@@ -276,8 +276,49 @@ function SeekToLineStart(startTime: number) {
 
 // Define proper type for event parameter
 function LinesEvListener(e: MouseEvent) {
-  const target = e.target as HTMLElement;
-  if (target.classList.contains("line")) {
+  const rawTarget = e.target as HTMLElement;
+  const lineParent = rawTarget?.closest?.(".line") as HTMLElement | null;
+
+  if (rawTarget?.classList?.contains("word")) {
+    let startTime: number | undefined;
+
+    LyricsObject.Types.Syllable.Lines.forEach((line) => {
+      if (line.Syllables?.Lead) {
+        line.Syllables.Lead.forEach((word, _, array) => {
+          if (word.HTMLElement === rawTarget) {
+            startTime = line.StartTime;
+            if (array.length > 0) {
+              startTime = array[0].StartTime;
+            }
+          }
+        });
+      }
+    });
+
+    if (startTime !== undefined) SeekToLineStart(startTime);
+  } else if (rawTarget?.classList?.contains("Emphasis")) {
+    let startTime: number | undefined;
+
+    LyricsObject.Types.Syllable.Lines.forEach((line) => {
+      if (line.Syllables?.Lead) {
+        line.Syllables.Lead.forEach((word, _, array) => {
+          if (word?.Letters) {
+            word.Letters.forEach((letter) => {
+              if (letter.HTMLElement === rawTarget) {
+                startTime = line.StartTime;
+                if (array.length > 0) {
+                  startTime = array[0].StartTime;
+                }
+              }
+            });
+          }
+        });
+      }
+    });
+
+    if (startTime !== undefined) SeekToLineStart(startTime);
+  } else if (lineParent || rawTarget?.classList?.contains("line")) {
+    const target = lineParent || rawTarget;
     let startTime: number | undefined;
 
     LyricsObject.Types.Line.Lines.forEach((line) => {
@@ -289,43 +330,16 @@ function LinesEvListener(e: MouseEvent) {
       }
     });
 
-    if (startTime !== undefined) SeekToLineStart(startTime);
-  } else if (target.classList.contains("word")) {
-    let startTime: number | undefined;
-
-    LyricsObject.Types.Syllable.Lines.forEach((line) => {
-      if (line.Syllables?.Lead) {
-        line.Syllables.Lead.forEach((word, _, array) => {
-          if (word.HTMLElement === target) {
-            startTime = line.StartTime;
-            if (array.length > 0) {
-              startTime = array[0].StartTime;
-            }
+    if (startTime === undefined) {
+      LyricsObject.Types.Syllable.Lines.forEach((line) => {
+        if (line.HTMLElement === target) {
+          startTime = line.StartTime;
+          if (line.Syllables?.Lead && line.Syllables.Lead.length > 0) {
+            startTime = line.Syllables.Lead[0].StartTime;
           }
-        });
-      }
-    });
-
-    if (startTime !== undefined) SeekToLineStart(startTime);
-  } else if (target.classList.contains("Emphasis")) {
-    let startTime: number | undefined;
-
-    LyricsObject.Types.Syllable.Lines.forEach((line) => {
-      if (line.Syllables?.Lead) {
-        line.Syllables.Lead.forEach((word, _, array) => {
-          if (word?.Letters) {
-            word.Letters.forEach((letter) => {
-              if (letter.HTMLElement === target) {
-                startTime = line.StartTime;
-                if (array.length > 0) {
-                  startTime = array[0].StartTime;
-                }
-              }
-            });
-          }
-        });
-      }
-    });
+        }
+      });
+    }
 
     if (startTime !== undefined) SeekToLineStart(startTime);
   }

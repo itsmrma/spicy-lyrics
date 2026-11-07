@@ -6,6 +6,7 @@ import PageView, { PageContainer } from "../../components/Pages/PageView.ts";
 import { Query, QueryHttpError, QueryNetworkError } from "../API/Query.ts";
 import { IsTripStatus, ServiceUnavailableError } from "../API/CircuitBreaker.ts";
 import { ProcessLyrics } from "./ProcessLyrics.ts";
+import { enrichLyricsWithGeniusSingers } from "./Genius/GeniusSingerAttribution.ts";
 import { IsEmptyLyrics } from "./EmptyLines.ts";
 import Logger from "../Logger.ts";
 import { LocalLyricsManager } from "./manager/index.ts";
@@ -35,6 +36,19 @@ export const LyricsStore = GetExpireStore<any>("SpicyLyrics_LyricsStore_g1", 7, 
 }, isDev as true);
 
 const lyricsPacker = new SLObjPack();
+
+async function enrichWithSingers(lyricsData: any): Promise<void> {
+  try {
+    const title = SpotifyPlayer.GetName();
+    const artists = SpotifyPlayer.GetArtists();
+    const artist = artists?.[0]?.name;
+    if (title && artist) {
+      await enrichLyricsWithGeniusSingers(lyricsData, title, artist);
+    }
+  } catch (err) {
+    lyricsLogger.debug("Singer attribution enrichment error", err);
+  }
+}
 
 function setRomanizationClass(hasTransliterations: boolean | undefined): void {
   if (hasTransliterations) {
@@ -285,6 +299,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
     // Local TTML is parsed fresh on every read, so it needs the same derivation
     // a remote payload gets — otherwise a locally stored song has no romanization.
     await ProcessLyrics(lyricsData);
+    await enrichWithSingers(lyricsData);
     if (isStaleFetch(uri)) return [lyricsData, 200];
     $currentLyricsData.set(JSON.stringify(lyricsData));
     presentLyrics(lyricsData);
@@ -318,6 +333,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
         // detection run here, against the current build, instead of serving
         // whatever an older build derived.
         await ProcessLyrics(lyricsFromCache);
+        await enrichWithSingers(lyricsFromCache);
         $currentLyricsData.set(JSON.stringify(lyricsFromCache));
         presentLyrics(lyricsFromCache);
         return [{ ...lyricsFromCache, fromCache: true }, 200];
@@ -482,6 +498,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
     const rawLyrics = structuredClone(lyrics);
 
     await ProcessLyrics(lyrics);
+    await enrichWithSingers(lyrics);
 
     // Pruning blank lines can empty out a payload the API still counted as a
     // hit. Nothing would render, so treat it as a miss rather than caching and

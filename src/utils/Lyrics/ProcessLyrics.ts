@@ -327,11 +327,17 @@ const romanizeJapaneseGroup = async (group: RomanizeEntry[]): Promise<boolean> =
   group.forEach((entry, index) => {
     if (hasTransliteration(entry.target)) return;
 
-    const text = romanized[index];
+    const item = romanized[index];
+    const text = typeof item === "string" ? item : item?.text;
+    const isPartOfWord = typeof item === "object" ? item?.isPartOfWord : undefined;
+
     // Punctuation and Latin text come back unchanged; there is nothing to show.
     if (text === undefined || text === "" || text === entry.target.Text) return;
 
     entry.target.TransliteratedText = text;
+    if (isPartOfWord !== undefined) {
+      entry.target.RomanizedIsPartOfWord = isPartOfWord;
+    }
     entry.line.HasTransliterations = true;
     applied = true;
 
