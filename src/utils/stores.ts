@@ -73,11 +73,26 @@ export function persistAtom<T>(key: string, defaultValue: T) {
 
 // Setting atoms (persisted)
 // "none" paints nothing, so a theme's own background (an image, say) shows through.
-export type BackgroundStyle = "dynamic" | "artist" | "cover" | "color" | "none";
-export const BACKGROUND_STYLES: readonly BackgroundStyle[] = ["dynamic", "artist", "cover", "color", "none"];
+export type BackgroundStyle =
+  | "dynamic"
+  | "cover-blur"
+  | "cover"
+  | "artist-blur"
+  | "artist"
+  | "color"
+  | "none";
+export const BACKGROUND_STYLES: readonly BackgroundStyle[] = [
+  "dynamic",
+  "cover-blur",
+  "cover",
+  "artist-blur",
+  "artist",
+  "color",
+  "none",
+];
 export const $backgroundStyle = persistAtom<BackgroundStyle>("backgroundStyle", "dynamic");
-// Blur radius (px) for the two image styles, "artist" and "cover".
-export const $backgroundBlur = persistAtom<number>("backgroundBlur", 0);
+// Blur radius (px) for the image styles: "cover-blur", "cover", "artist-blur", "artist".
+export const $backgroundBlur = persistAtom<number>("backgroundBlur", 64);
 export const $simpleLyricsMode = persistAtom<boolean>("simpleLyricsMode", false);
 export const $minimalLyricsMode = persistAtom<boolean>("minimalLyricsMode", false);
 // Shows a word sung in syllables as one word when its parts line up evenly.

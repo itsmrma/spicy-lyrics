@@ -7,6 +7,7 @@ import {
   $minimalLyricsMode,
   $simpleLyricsMode,
 } from "../../../utils/stores.ts";
+import { $experiment } from "../../../utils/experiments.ts";
 import { Toggle } from "./components.tsx";
 import { LyricsIcon } from "./icons.tsx";
 import type { GroupDef, SectionDef } from "./model.ts";
@@ -21,13 +22,29 @@ const groups: GroupDef[] = [
         label: "Simple Lyrics Mode",
         description: "Drop the extra visual effects from the lyrics.",
         keywords: "effects plain",
-        Control: ({ label }) => (
-          <Toggle
-            label={label}
-            checked={useStore($simpleLyricsMode)}
-            onChange={(v) => $simpleLyricsMode.set(v)}
-          />
-        ),
+        useNote: () => {
+          const isPerf = useStore($experiment("performanceMode"));
+          return isPerf ? "Forced on while Performance Mode is active." : undefined;
+        },
+        useDisabled: () => {
+          const isPerf = useStore($experiment("performanceMode"));
+          return isPerf ? "Forced on in Performance Mode for maximum responsiveness." : undefined;
+        },
+        Control: ({ disabled, label }) => {
+          const isPerf = useStore($experiment("performanceMode"));
+          return (
+            <Toggle
+              label={label}
+              disabled={disabled}
+              locked={isPerf}
+              checked={isPerf ? true : useStore($simpleLyricsMode)}
+              onChange={(v) => {
+                if (isPerf) return;
+                $simpleLyricsMode.set(v);
+              }}
+            />
+          );
+        },
       },
       {
         id: "minimalLyricsMode",
