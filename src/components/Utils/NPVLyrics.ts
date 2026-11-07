@@ -26,6 +26,7 @@ import {
 import { SpotifyPlayer } from "../Global/SpotifyPlayer.ts";
 import { isRomanized, setRomanizedStatus } from "../../utils/Lyrics/lyrics.ts";
 import ApplyLyrics from "../../utils/Lyrics/Global/Applyer.ts";
+import { isExperimentEnabled } from "../../utils/experiments.ts";
 import Logger from "../../utils/Logger.ts";
 
 const cardLogger = new Logger("NPV Lyrics");
@@ -351,6 +352,9 @@ const STATE_ANIM_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 function animateStateChange(mutate: () => void): Animation | null {
   if (
     !cardEl ||
+    // Performance Mode: the FLIP morph animates width and height, which lays
+    // the card out again on every frame. Apply the state in one shot instead.
+    isExperimentEnabled("performanceMode") ||
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   ) {
     mutate();
@@ -438,6 +442,11 @@ function morphExpandedState(mutate: () => void): void {
   const card = cardEl;
   if (
     !card ||
+    // Performance Mode: a view transition snapshots the whole panel (cover,
+    // sections and the lyrics) and morphs those images. Skipping it applies the
+    // expanded layout once, with no snapshot work and no cross-fade of a large
+    // page. Turning Performance Mode off brings the morph back.
+    isExperimentEnabled("performanceMode") ||
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   ) {
     mutate();

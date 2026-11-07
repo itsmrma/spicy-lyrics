@@ -22,7 +22,12 @@ const lyricsCacheLogger = new Logger("Lyrics Cache");
 
 // A getter, because the expiry is computed on every write: a pushed TTL applies
 // to entries cached from then on, while existing ones keep the one they got.
-export const LyricsStore = GetExpireStore<any>("SpicyLyrics_LyricsStore_g1", 6, {
+//
+// Cache version 7 stores the RAW payload and processes it on read. Version 6
+// stored the payload after ProcessLyrics had derived its transliterations, so a
+// romanization fix never reached a cached track; bumping the version drops those
+// entries. Keep it that way: only raw data in the cache.
+export const LyricsStore = GetExpireStore<any>("SpicyLyrics_LyricsStore_g1", 7, {
   Unit: "Days",
   get Duration() {
     return getRemoteConfig().cache.lyricsTtlDays;
@@ -277,6 +282,9 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
   const localLyric = await LocalLyricsManager.get(uri);
   if (localLyric) {
     const lyricsData = { ...localLyric, uri };
+    // Local TTML is parsed fresh on every read, so it needs the same derivation
+    // a remote payload gets — otherwise a locally stored song has no romanization.
+    await ProcessLyrics(lyricsData);
     if (isStaleFetch(uri)) return [lyricsData, 200];
     $currentLyricsData.set(JSON.stringify(lyricsData));
     presentLyrics(lyricsData);
@@ -306,6 +314,10 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
         // entries predate the uri field.
         const lyricsFromCache = { ...(lyricsFromCacheRes ?? {}), uri };
         if (isStaleFetch(uri)) return [{ ...lyricsFromCache, fromCache: true }, 200];
+        // The cache holds the raw payload, so romanization and language
+        // detection run here, against the current build, instead of serving
+        // whatever an older build derived.
+        await ProcessLyrics(lyricsFromCache);
         $currentLyricsData.set(JSON.stringify(lyricsFromCache));
         presentLyrics(lyricsFromCache);
         return [{ ...lyricsFromCache, fromCache: true }, 200];
@@ -464,6 +476,11 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
       return ["lyrics-not-found", 404];
     }
 
+    // Taken before ProcessLyrics mutates the payload: only the raw data goes in
+    // the cache, so the next read derives transliterations with the build that
+    // is running then.
+    const rawLyrics = structuredClone(lyrics);
+
     await ProcessLyrics(lyrics);
 
     // Pruning blank lines can empty out a payload the API still counted as a
@@ -482,10 +499,13 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
     lyrics.uri = uri;
 
     // The request already completed, so cache it either way — even if the user
-    // has skipped on, the next play of this track gets a cache hit.
+    // has skipped on, the next play of this track gets a cache hit. Only the raw
+    // payload goes in: ProcessLyrics derives transliterations in place, and
+    // caching those is what kept a romanization fix from reaching old tracks.
     if (LyricsStore) {
       try {
-        await LyricsStore.SetItem(trackId, lyrics);
+        rawLyrics.uri = uri;
+        await LyricsStore.SetItem(trackId, rawLyrics);
       } catch (error) {
         lyricsCacheLogger.error("Error saving lyrics to cache", error);
       }
