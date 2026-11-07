@@ -27,6 +27,7 @@ import { ApplySongCredits, MarkLastLineSide } from "../Credits/ApplyLyricsCredit
 import { EmitApply, EmitNotApplyed } from "../OnApply.ts";
 import { RemoveEmptyLyricsLines } from "../../EmptyLines.ts";
 import { isExperimentEnabled } from "../../../experiments.ts";
+import { createSingerBadgeContainer } from "../../Genius/GeniusSingerAttribution.ts";
 
 // Define the data structure for lyrics
 interface LyricsLineData {
@@ -200,16 +201,10 @@ export function ApplyLineLyrics(data: LyricsData, UseRomanized: boolean = false)
       isExperimentEnabled("geniusSingerAttribution") && !!line.Singer;
 
     if (showSinger && line.Singer) {
-      const singerContainer = document.createElement("div");
-      singerContainer.classList.add("SingerBadgeContainer");
-      const singerNames = line.Singer.split(/\s*[,&]\s*/).filter(Boolean);
-      for (const name of singerNames) {
-        const singerElem = document.createElement("span");
-        singerElem.classList.add("SingerBadge");
-        singerElem.textContent = name.trim();
-        singerContainer.appendChild(singerElem);
+      const singerContainer = createSingerBadgeContainer(line.Singer);
+      if (singerContainer) {
+        lineElem.appendChild(singerContainer);
       }
-      lineElem.appendChild(singerContainer);
     }
 
     if (showDual && line.Text) {

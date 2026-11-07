@@ -37,6 +37,7 @@ import { JoinSplitWords } from "../Utils/JoinSplitWords.ts";
 import { SplitLetters } from "../Utils/SplitLetters.ts";
 import { HasRenderableText, IsEmptySyllableGroup, RemoveEmptyLyricsLines } from "../../EmptyLines.ts";
 import { isExperimentEnabled } from "../../../experiments.ts";
+import { createSingerBadgeContainer } from "../../Genius/GeniusSingerAttribution.ts";
 
 // Define the data structure for syllable lyrics
 interface SyllableData {
@@ -269,16 +270,10 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
       isExperimentEnabled("geniusSingerAttribution") && !!singerName;
 
     if (showSinger && singerName) {
-      const singerContainer = document.createElement("div");
-      singerContainer.classList.add("SingerBadgeContainer");
-      const singerNames = singerName.split(/\s*[,&]\s*/).filter(Boolean);
-      for (const name of singerNames) {
-        const singerElem = document.createElement("span");
-        singerElem.classList.add("SingerBadge");
-        singerElem.textContent = name.trim();
-        singerContainer.appendChild(singerElem);
+      const singerContainer = createSingerBadgeContainer(singerName);
+      if (singerContainer) {
+        lineElem.appendChild(singerContainer);
       }
-      lineElem.appendChild(singerContainer);
     }
 
     let origElem: HTMLElement | null = null;
@@ -429,21 +424,17 @@ export function ApplySyllableLyrics(data: LyricsData, UseRomanized: boolean = fa
             (s) => s.TransliteratedText && s.TransliteratedText !== s.Text
           );
 
-        const bgSingerName = bg.Singer || line.Singer;
+        const bgSingerName = bg.Singer;
         const showBgSinger =
-          isExperimentEnabled("geniusSingerAttribution") && !!bgSingerName;
+          isExperimentEnabled("geniusSingerAttribution") &&
+          !!bgSingerName &&
+          bgSingerName.toLowerCase() !== (singerName ?? "").toLowerCase();
 
         if (showBgSinger && bgSingerName) {
-          const singerContainer = document.createElement("div");
-          singerContainer.classList.add("SingerBadgeContainer");
-          const singerNames = bgSingerName.split(/\s*[,&]\s*/).filter(Boolean);
-          for (const name of singerNames) {
-            const singerElem = document.createElement("span");
-            singerElem.classList.add("SingerBadge");
-            singerElem.textContent = name.trim();
-            singerContainer.appendChild(singerElem);
+          const singerContainer = createSingerBadgeContainer(bgSingerName);
+          if (singerContainer) {
+            lineE.appendChild(singerContainer);
           }
-          lineE.appendChild(singerContainer);
         }
 
         let bgOrigElem: HTMLElement | null = null;

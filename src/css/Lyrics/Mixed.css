@@ -1361,47 +1361,62 @@
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer {
   position: absolute;
-  right: calc(100% + 0.85em);
-  top: 0.22em;
+  right: calc(100% + 0.75em);
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 0.35em;
+  justify-content: center;
+  gap: 0.16em;
   pointer-events: none;
   user-select: none;
-  max-width: calc(var(--LyricsLeftSidePadding, 18cqw) - 1.2em);
+  width: max-content;
+  max-width: min(14cqw, calc(var(--LyricsLeftSidePadding, 18cqw) - 1em));
   z-index: 2;
 }
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.OppositeAligned .SingerBadgeContainer {
-  position: static;
-  margin-right: 0.85em;
-  margin-top: 0.22em;
-  align-self: flex-start;
-  align-items: flex-end;
-  order: -1;
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer.MultiSinger {
+  gap: 0.14em;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer.MultiSinger.ThreeSingers {
+  gap: 0.1em;
 }
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.rtl:not(.OppositeAligned) .SingerBadgeContainer {
   right: auto;
-  left: calc(100% + 0.85em);
+  left: calc(100% + 0.75em);
   align-items: flex-start;
 }
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.rtl.OppositeAligned .SingerBadgeContainer {
-  margin-right: 0;
-  margin-left: 0.85em;
-  order: 999;
+#SpicyLyricsPage.CardMode.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer,
+.spicy-pip-wrapper #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer {
+  position: static;
+  transform: none;
+  width: 100%;
+  max-width: 100%;
+  flex-basis: 100%;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.25em;
+  margin-bottom: 0.16em;
+}
+
+#SpicyLyricsPage.CardMode.SpicyRenderer .LyricsContainer .LyricsContent .line.OppositeAligned .SingerBadgeContainer,
+.spicy-pip-wrapper #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.OppositeAligned .SingerBadgeContainer {
+  justify-content: flex-end;
 }
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 0.36em;
+  display: inline-block;
+  font-size: 0.32em;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 0.22em 0.65em;
+  letter-spacing: 0.06em;
+  padding: 0.2em 0.62em;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
   color: rgba(255, 255, 255, 0.95);
@@ -1411,19 +1426,29 @@
   pointer-events: none;
   user-select: none;
   backdrop-filter: blur(8px);
-  width: fit-content;
+  width: max-content;
   max-width: 100%;
-  white-space: normal;
-  word-break: break-word;
-  text-align: right;
-  line-height: 1.25;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1.2;
   flex-shrink: 0;
-  opacity: 0.8;
+  opacity: 0.85;
   transition: opacity 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.OppositeAligned .SingerBadge {
-  text-align: right;
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer.MultiSinger .SingerBadge {
+  font-size: 0.27em;
+  padding: 0.14em 0.52em;
+  line-height: 1.15;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .SingerBadgeContainer.MultiSinger.ThreeSingers .SingerBadge {
+  font-size: 0.23em;
+  padding: 0.11em 0.46em;
+  line-height: 1.1;
 }
 
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.Active .SingerBadge {
