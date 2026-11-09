@@ -14,7 +14,7 @@ import { cancelCappedFrame, requestCappedFrame } from "../AnimationFrameLoop.ts"
 // Gap scale factors relative to 1cqw (containerWidth / 100).
 // Gap is baked into each wrapper's padding-bottom so items can have
 // different trailing gaps without any virtualizer-level workaround.
-const GAP_NORMAL = 1;      // 1cqw — line↔line and bg-line↔next-line
+const GAP_NORMAL = 1; // 1cqw — line↔line and bg-line↔next-line
 const GAP_LINE_TO_BG = 0.2; // 0.2cqw — line↔bg-line (bg sits closer to its parent)
 
 const ESTIMATE: Record<string, number> = {
@@ -252,6 +252,7 @@ class LyricsVirtualizer {
     align: "start" | "center" | "end" | "auto";
     instant: boolean;
     padding: number;
+    anticipated?: number;
   } | null = null;
   private _cascadeRows = new Map<number, CascadeRow>();
   // scrollTop the ripple is converging on.
@@ -285,8 +286,7 @@ class LyricsVirtualizer {
     );
   }
 
-  // Collapsed background lines take no space, so the gap is set by the first
-  // line after them that does.
+  // Next line that takes layout space is a background line.
   private _isNextBgLine(index: number): boolean {
     let i = index + 1;
     while (this._isCollapsedBg(this._allElements[i])) i++;
@@ -296,15 +296,33 @@ class LyricsVirtualizer {
 
   private _itemGap(index: number): number {
     if (index >= this._allElements.length - 1) return 0;
-    if (this._isCollapsedBg(this._allElements[index])) return 0;
+    const el = this._allElements[index];
+    const cqw = this._containerWidth / 100;
+    const normalGap =
+      this._refreshed && this._gapFontPx > 0
+        ? this._gapFontPx * REFRESHED_GAP_EM
+        : GAP_NORMAL * cqw;
+
+    if (this._isCollapsedBg(el)) {
+      // If another bg-line follows, this intermediate collapsed row takes no gap.
+      if (this._allElements[index + 1]?.classList.contains("bg-line")) return 0;
+      // The last collapsed bg-line in the cluster provides the remaining gap to the
+      // following non-bg line, so the lead line above never has to jump its padding.
+      return Math.max(0, normalGap - GAP_LINE_TO_BG * cqw);
+    }
+
     // Inactive musical-lines collapse to zero height; suppress their trailing gap
     // too so there is no double-gap between the surrounding lines.
-    const el = this._allElements[index];
     if (el?.classList.contains("musical-line") && !el.classList.contains("Active")) return 0;
-    const cqw = this._containerWidth / 100;
+
+    // If a bg-line immediately follows (active or collapsed), this row maintains the small lead-to-bg gap.
+    // This guarantees the bg-line wrapper start position never shifts downward when collapsing.
+    if (this._bgPop && this._allElements[index + 1]?.classList.contains("bg-line")) {
+      return GAP_LINE_TO_BG * cqw;
+    }
+
     if (this._isNextBgLine(index)) return GAP_LINE_TO_BG * cqw;
-    if (this._refreshed && this._gapFontPx > 0) return this._gapFontPx * REFRESHED_GAP_EM;
-    return GAP_NORMAL * cqw;
+    return normalGap;
   }
 
   // Reads a mounted lyrics line's font size into _gapFontPx. Costs a style
@@ -413,7 +431,8 @@ class LyricsVirtualizer {
     let bgFirst = Infinity;
     if (this._bgPop) {
       for (const index of indices) {
-        if (index < bgFirst && this._allElements[index]?.classList.contains("bg-line")) bgFirst = index;
+        if (index < bgFirst && this._allElements[index]?.classList.contains("bg-line"))
+          bgFirst = index;
       }
     }
     const toMeasure: HTMLElement[] = [];
@@ -481,18 +500,17 @@ class LyricsVirtualizer {
     // the target's place every frame and needs nothing. A list that has come
     // to rest is left alone; the animator holds an ended group open until the
     // list next moves, so a fold always lands inside a motion.
-    if (
-      target &&
-      bgFirst < target.index &&
-      this._smoothRAF === null &&
-      this._retryMotion()
-    ) {
+    if (target && bgFirst < target.index && this._smoothRAF === null && this._retryMotion()) {
       let moved = 0;
       above.forEach((i, k) => (moved += (sizeOf(i) ?? 0) - before[k]));
       for (const { index, prev } of resized) {
         if (index < target.index) moved += (sizeOf(index) ?? prev) - prev;
       }
-      if (Math.abs(moved) >= 1) this._reaimNextFrame(v, target);
+      const anticipated = target.anticipated ?? 0;
+      const absorbed = Math.min(anticipated, Math.max(0, -moved));
+      target.anticipated = anticipated - absorbed;
+      const unpredicted = moved + absorbed;
+      if (Math.abs(unpredicted) >= 1) this._reaimNextFrame(v, target);
     }
     if (toMeasure.length > 0 && this._resizeRAF === null) {
       this._resizeRAF = requestAnimationFrame(() => {
@@ -548,8 +566,8 @@ class LyricsVirtualizer {
       // a 0 estimate for an Active dotline lets every following item render at
       // a wrong start position until the ResizeObserver catches up.
       h = el.classList.contains("Active") ? ESTIMATE.default : ESTIMATE["musical-line"];
-    }
-    else if (el.classList.contains("bg-line")) h = this._isCollapsedBg(el) ? 0 : ESTIMATE["bg-line"];
+    } else if (el.classList.contains("bg-line"))
+      h = this._isCollapsedBg(el) ? 0 : ESTIMATE["bg-line"];
     else h = ESTIMATE.default;
     return h + this._itemGap(index);
   };
@@ -728,11 +746,7 @@ class LyricsVirtualizer {
     }, 200);
   };
 
-  init(
-    scrollEl: HTMLElement,
-    virtualContainer: HTMLElement,
-    lineElements: HTMLElement[]
-  ): void {
+  init(scrollEl: HTMLElement, virtualContainer: HTMLElement, lineElements: HTMLElement[]): void {
     virtualizerLogger.info("Initializing lyrics virtualizer", {
       lineCount: lineElements.length,
       scrollClientHeight: scrollEl.clientHeight,
@@ -741,8 +755,14 @@ class LyricsVirtualizer {
     this.destroy();
     this._maid = new Maid();
     this._maid.Give(() => {
-      if (this._scrollEndTimer !== null) { clearTimeout(this._scrollEndTimer); this._scrollEndTimer = null; }
-      if (this._resizeRAF !== null) { cancelAnimationFrame(this._resizeRAF); this._resizeRAF = null; }
+      if (this._scrollEndTimer !== null) {
+        clearTimeout(this._scrollEndTimer);
+        this._scrollEndTimer = null;
+      }
+      if (this._resizeRAF !== null) {
+        cancelAnimationFrame(this._resizeRAF);
+        this._resizeRAF = null;
+      }
     });
     this._allElements = lineElements;
     this._indexByElement = new Map(lineElements.map((el, i) => [el, i]));
@@ -771,45 +791,49 @@ class LyricsVirtualizer {
     this._containerHeight = scrollEl.clientHeight;
     virtualizerLogger.debug("Initial container width resolved", containerWidth);
 
-    this._resizeObserver = this._maid!.Give(new ResizeObserver((entries) => {
-      const v = this._virtualizer;
-      if (!v) return;
-      // When minimized the scroll element collapses to 0×0 and every wrapper fires
-      // with 0 offsetHeight; caching those zeros corrupts the cache so on restore all
-      // items land at start=0. Only write measurements when the container is rendered.
-      if (this._scrollEl && this._scrollEl.clientWidth === 0) {
-        virtualizerLogger.debug("Skipping resize measure: container width is zero");
-        return;
-      }
-      const toMeasure: HTMLElement[] = [];
-      for (const entry of entries) {
-        const el = entry.target as HTMLElement;
-        if (!el.isConnected) continue;
-        if (el.getAttribute("data-index") === null) continue;
-        toMeasure.push(el);
-      }
-      this._measureBatch(v, toMeasure);
-      if (toMeasure.length > 0 && this._resizeRAF === null) {
-        this._resizeRAF = requestAnimationFrame(() => {
-          this._resizeRAF = null;
-          if (this._virtualizer === v) {
-            virtualizerLogger.debug("ResizeObserver scheduled virtualizer update");
-            v._willUpdate();
-          }
-        });
-      }
-    }));
+    this._resizeObserver = this._maid!.Give(
+      new ResizeObserver((entries) => {
+        const v = this._virtualizer;
+        if (!v) return;
+        // When minimized the scroll element collapses to 0×0 and every wrapper fires
+        // with 0 offsetHeight; caching those zeros corrupts the cache so on restore all
+        // items land at start=0. Only write measurements when the container is rendered.
+        if (this._scrollEl && this._scrollEl.clientWidth === 0) {
+          virtualizerLogger.debug("Skipping resize measure: container width is zero");
+          return;
+        }
+        const toMeasure: HTMLElement[] = [];
+        for (const entry of entries) {
+          const el = entry.target as HTMLElement;
+          if (!el.isConnected) continue;
+          if (el.getAttribute("data-index") === null) continue;
+          toMeasure.push(el);
+        }
+        this._measureBatch(v, toMeasure);
+        if (toMeasure.length > 0 && this._resizeRAF === null) {
+          this._resizeRAF = requestAnimationFrame(() => {
+            this._resizeRAF = null;
+            if (this._virtualizer === v) {
+              virtualizerLogger.debug("ResizeObserver scheduled virtualizer update");
+              v._willUpdate();
+            }
+          });
+        }
+      })
+    );
 
-    this._classObserver = this._maid!.Give(new MutationObserver((mutations) => {
-      const v = this._virtualizer;
-      if (!v) return;
-      const indices: number[] = [];
-      for (const mutation of mutations) {
-        const index = this._indexByElement.get(mutation.target as HTMLElement);
-        if (index !== undefined) indices.push(index);
-      }
-      this._rowsChanged(v, indices);
-    }));
+    this._classObserver = this._maid!.Give(
+      new MutationObserver((mutations) => {
+        const v = this._virtualizer;
+        if (!v) return;
+        const indices: number[] = [];
+        for (const mutation of mutations) {
+          const index = this._indexByElement.get(mutation.target as HTMLElement);
+          if (index !== undefined) indices.push(index);
+        }
+        this._rowsChanged(v, indices);
+      })
+    );
     // Single subtree observer on the virtual container rather than one per element:
     // only mounted elements live there, so it scopes to where gap updates matter.
     this._classObserver.observe(virtualContainer, {
@@ -873,7 +897,7 @@ class LyricsVirtualizer {
         // re-mount so the first paint isn't blank when opening the page.
         this._syncScrollRect();
         this._onVirtualizerChange(v);
-      })
+      });
     });
 
     scrollEl.addEventListener("scrollend", this._onScrollEnd, { passive: true });
@@ -909,57 +933,59 @@ class LyricsVirtualizer {
     this._spacer = spacer;
     this._maid!.Give(() => spacer.parentElement?.removeChild(spacer));
 
-    this._widthObserver = this._maid!.Give(new ResizeObserver(() => {
-      const v = this._virtualizer;
-      const el = this._scrollEl;
-      if (!v || !el) return;
-      const newWidth = el.clientWidth;
-      
-      if (newWidth === 0) {
-        virtualizerLogger.debug("Ignoring width change to 0 (likely minimized)");
-        return;
-      }
-      // The viewport moved under a glide in flight; have it re-read its geometry.
-      this._smoothGeometry = null;
-      if (this._spacer) this._spacer.style.height = `${el.clientHeight / 2}px`;
-      if (Math.abs(newWidth - this._containerWidth) < 1) {
-        // Width unchanged, but a height-only resize (vertical-only window resize,
-        // PIP) still changes the visible window. The early return would otherwise
-        // swallow it until the watchdog catches up; respond immediately here.
-        if (Math.abs(el.clientHeight - this._containerHeight) >= 1) {
-          virtualizerLogger.debug("Container height changed (width stable)", {
-            previous: this._containerHeight,
-            next: el.clientHeight,
-          });
-          this._containerHeight = el.clientHeight;
-          this._blockLayoutGlide(LAYOUT_GLIDE_BLOCK_MS);
-          v._willUpdate();
-        }
-        return;
-      }
-      
-      this._blockLayoutGlide(LAYOUT_GLIDE_BLOCK_MS);
-      virtualizerLogger.info("Container width changed", {
-        previous: this._containerWidth,
-        next: newWidth,
-      });
-      this._containerWidth = newWidth;
-      this._containerHeight = el.clientHeight;
+    this._widthObserver = this._maid!.Give(
+      new ResizeObserver(() => {
+        const v = this._virtualizer;
+        const el = this._scrollEl;
+        if (!v || !el) return;
+        const newWidth = el.clientWidth;
 
-      // Clear any existing timer
-      if (this._resizeDebounceTimer !== null) {
-        clearTimeout(this._resizeDebounceTimer);
-      }
-    
-      // Wait 150ms after the user STOPS resizing before measuring.
-      // This lets sluggish devices finish their DOM reflow before TanStack measures.
-      this._resizeDebounceTimer = setTimeout(() => {
-        this._resizeDebounceTimer = null;
-        virtualizerLogger.debug("Applying debounced resize remeasure");
-        this._remeasureVisible();
-        v._willUpdate();
-      }, 150);
-    }));
+        if (newWidth === 0) {
+          virtualizerLogger.debug("Ignoring width change to 0 (likely minimized)");
+          return;
+        }
+        // The viewport moved under a glide in flight; have it re-read its geometry.
+        this._smoothGeometry = null;
+        if (this._spacer) this._spacer.style.height = `${el.clientHeight / 2}px`;
+        if (Math.abs(newWidth - this._containerWidth) < 1) {
+          // Width unchanged, but a height-only resize (vertical-only window resize,
+          // PIP) still changes the visible window. The early return would otherwise
+          // swallow it until the watchdog catches up; respond immediately here.
+          if (Math.abs(el.clientHeight - this._containerHeight) >= 1) {
+            virtualizerLogger.debug("Container height changed (width stable)", {
+              previous: this._containerHeight,
+              next: el.clientHeight,
+            });
+            this._containerHeight = el.clientHeight;
+            this._blockLayoutGlide(LAYOUT_GLIDE_BLOCK_MS);
+            v._willUpdate();
+          }
+          return;
+        }
+
+        this._blockLayoutGlide(LAYOUT_GLIDE_BLOCK_MS);
+        virtualizerLogger.info("Container width changed", {
+          previous: this._containerWidth,
+          next: newWidth,
+        });
+        this._containerWidth = newWidth;
+        this._containerHeight = el.clientHeight;
+
+        // Clear any existing timer
+        if (this._resizeDebounceTimer !== null) {
+          clearTimeout(this._resizeDebounceTimer);
+        }
+
+        // Wait 150ms after the user STOPS resizing before measuring.
+        // This lets sluggish devices finish their DOM reflow before TanStack measures.
+        this._resizeDebounceTimer = setTimeout(() => {
+          this._resizeDebounceTimer = null;
+          virtualizerLogger.debug("Applying debounced resize remeasure");
+          this._remeasureVisible();
+          v._willUpdate();
+        }, 150);
+      })
+    );
     this._widthObserver.observe(scrollEl);
 
     // Watchdog catching drift within ~250ms when an observer notification above is
@@ -1053,7 +1079,8 @@ class LyricsVirtualizer {
   ): void {
     const measure = (wrapper: HTMLElement) => {
       if (!force) v.measureElement(wrapper);
-      else if (wrapper.isConnected) v.resizeItem(Number(wrapper.dataset.index), this._measureHeight(wrapper));
+      else if (wrapper.isConnected)
+        v.resizeItem(Number(wrapper.dataset.index), this._measureHeight(wrapper));
     };
     if (this._inOnChange) {
       for (const wrapper of wrappers) measure(wrapper);
@@ -1267,24 +1294,55 @@ class LyricsVirtualizer {
   private _glideTrailing(delta: number): void {
     if (isExperimentEnabled("performanceMode")) return;
     for (const el of this._trailingElements()) {
-      el.animate(
-        [{ transform: `translateY(${-delta}px)` }, { transform: "translateY(0)" }],
-        { duration: LAYOUT_GLIDE_MS, easing: LAYOUT_GLIDE_EASING, composite: "add" }
-      );
+      el.animate([{ transform: `translateY(${-delta}px)` }, { transform: "translateY(0)" }], {
+        duration: LAYOUT_GLIDE_MS,
+        easing: LAYOUT_GLIDE_EASING,
+        composite: "add",
+      });
     }
   }
 
   /**
-   * How much a "•••" interlude line right above `index` will give up. Once the
-   * line after it starts the interlude collapses to nothing, but a scroll to
-   * that line often starts first (Early Scroll, the ripple, Smooth Scrolling).
+   * How much a "•••" interlude line or collapsing background lines right above
+   * `index` will give up. Once the line after them starts, the interlude or
+   * background lines collapse to nothing, but a scroll to that line often
+   * starts first (Early Scroll, the ripple, Smooth Scrolling).
    * Aimed at the line's current place, it would end up this far above centre
    * when the collapse lands, so the scroll aims where the line is going.
    */
   private _collapsingAbove(v: Virtualizer<HTMLElement, HTMLElement>, index: number): number {
-    if (!this._allElements[index - 1]?.classList.contains("musical-line")) return 0;
-    const above = v.measurementsCache[index - 1] as { size: number } | undefined;
-    return above ? above.size : 0;
+    if (index <= 0) return 0;
+    let total = 0;
+
+    if (this._allElements[index - 1]?.classList.contains("musical-line")) {
+      const above = v.measurementsCache[index - 1] as { size: number } | undefined;
+      total += above ? above.size : 0;
+    }
+
+    if (this._bgPop && !this._allElements[index]?.classList.contains("bg-line")) {
+      let bgDelta = 0;
+      let i = index - 1;
+      const cqw = this._containerWidth / 100;
+      const normalGap =
+        this._refreshed && this._gapFontPx > 0
+          ? this._gapFontPx * REFRESHED_GAP_EM
+          : GAP_NORMAL * cqw;
+      const leadGap = GAP_LINE_TO_BG * cqw;
+      while (i >= 0 && this._allElements[i]?.classList.contains("bg-line")) {
+        const el = this._allElements[i];
+        if (!this._isCollapsedBg(el)) {
+          const cached = v.measurementsCache[i] as { size: number } | undefined;
+          const currentSize = cached && cached.size > 0 ? cached.size : this._estimateSize(i);
+          const nextIsBg = this._allElements[i + 1]?.classList.contains("bg-line");
+          const collapsedGap = nextIsBg ? 0 : Math.max(0, normalGap - leadGap);
+          bgDelta += Math.max(0, currentSize - collapsedGap);
+        }
+        i--;
+      }
+      total += bgDelta;
+    }
+
+    return total;
   }
 
   getVirtualizer(): Virtualizer<HTMLElement, HTMLElement> | null {
@@ -1537,9 +1595,10 @@ class LyricsVirtualizer {
 
     const animating = this._smoothRAF !== null;
     // Where the list visually is right now, sub-pixel remainder included.
-    const current = animating && this._smoothSpring
-      ? scrollEl.scrollTop + this._smoothFraction
-      : scrollEl.scrollTop;
+    const current =
+      animating && this._smoothSpring
+        ? scrollEl.scrollTop + this._smoothFraction
+        : scrollEl.scrollTop;
 
     const isPerf = isExperimentEnabled("performanceMode");
     const freq = isPerf ? 1.5 : SMOOTH_SCROLL_FREQUENCY;
@@ -1728,7 +1787,9 @@ class LyricsVirtualizer {
     // advances by twice that interval: the glide resumes from where it was shown
     // instead of leaping to where it would have been, which is the jump people see.
     const raw =
-      this._smoothLastTs === null ? 1 / 60 : Math.min((ts - this._smoothLastTs) / 1000, SMOOTH_SCROLL_MAX_ELAPSED);
+      this._smoothLastTs === null
+        ? 1 / 60
+        : Math.min((ts - this._smoothLastTs) / 1000, SMOOTH_SCROLL_MAX_ELAPSED);
     this._smoothLastTs = ts;
     const usual = this._smoothFrameAvg ?? raw;
     let elapsed = Math.min(raw, Math.max(usual * 2, 1 / 60));
@@ -1933,7 +1994,10 @@ class LyricsVirtualizer {
       this._setConverging(false);
       return;
     }
-    if (retry === 0) this._lastRetryTarget = { index, align, instant, padding };
+    const collapsing = this._collapsingAbove(v, index);
+    if (retry === 0) {
+      this._lastRetryTarget = { index, align, instant, padding, anticipated: collapsing };
+    }
 
     const scrollEl = v.scrollElement;
     if (!scrollEl) {
@@ -1950,10 +2014,7 @@ class LyricsVirtualizer {
     // If something else moved the scroll between our last set and this retry
     // (user scroll, another scrollTo call, etc), abandon the retry chain so we
     // don't fight whoever took over.
-    if (
-      expectedScrollTop !== null &&
-      Math.abs(scrollEl.scrollTop - expectedScrollTop) > 2
-    ) {
+    if (expectedScrollTop !== null && Math.abs(scrollEl.scrollTop - expectedScrollTop) > 2) {
       virtualizerLogger.debug("Aborting scrollToIndex retry: external scroll detected", {
         expectedScrollTop,
         actualScrollTop: scrollEl.scrollTop,
@@ -1964,7 +2025,7 @@ class LyricsVirtualizer {
     }
 
     const rect = this._getItemRect(v, index);
-    const itemStart = rect.start - this._collapsingAbove(v, index);
+    const itemStart = rect.start - collapsing;
     const itemSize = rect.size;
 
     const containerRect = this._virtualContainer.getBoundingClientRect();
@@ -2091,9 +2152,7 @@ class LyricsVirtualizer {
           return;
         }
 
-        const fresh = v.measurementsCache[index] as
-          | { start: number; size: number }
-          | undefined;
+        const fresh = v.measurementsCache[index] as { start: number; size: number } | undefined;
         // Did the cache move item N's position/size since we read it? Newly-mounted
         // items above N can shift its `start` even if N itself wasn't measured.
         const drift = fresh
