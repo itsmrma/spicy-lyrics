@@ -12,7 +12,6 @@ import {
 import { BlurMultiplier, timeOffset } from "../Shared.ts";
 import {
   isBgPopActive,
-  isLyricsListMoving,
   setOnNewElementMounted,
   syncDetachedBackgroundLines,
 } from "../../LyricsVirtualizer.ts";
@@ -80,9 +79,7 @@ const ScaleSpline = GetSpline(ScaleRange);
 let LetterScaleSpline = GetSpline(
   $simpleLyricsMode.get() ? SimpleLetterScaleRange : LetterScaleRange
 );
-let YOffsetSpline = GetSpline(
-  $simpleLyricsMode.get() ? SimpleYOffsetRange : YOffsetRange
-);
+let YOffsetSpline = GetSpline($simpleLyricsMode.get() ? SimpleYOffsetRange : YOffsetRange);
 
 const LetterYOffsetRange = [
   { Time: 0, Value: 1 / 100 },
@@ -90,13 +87,11 @@ const LetterYOffsetRange = [
   { Time: 1, Value: 0 },
 ];
 
-
 const SimpleLetterYOffsetRange = [
   { Time: 0, Value: 1 / 100 },
   { Time: 0.9, Value: -(1 / 62) },
   { Time: 1, Value: 0 },
 ];
-
 
 let LetterYOffsetSpline = GetSpline(
   $simpleLyricsMode.get() ? SimpleLetterYOffsetRange : LetterYOffsetRange
@@ -230,7 +225,7 @@ const createLetterSprings = () => {
 $simpleLyricsMode.subscribe((simpleLyricsMode) => {
   YOffsetSpline = GetSpline(simpleLyricsMode ? SimpleYOffsetRange : YOffsetRange);
   DotOpacitySpline = GetSpline(getDotOpacityRange(simpleLyricsMode));
-  LetterYOffsetSpline = GetSpline(simpleLyricsMode? SimpleLetterYOffsetRange : LetterYOffsetRange);
+  LetterYOffsetSpline = GetSpline(simpleLyricsMode ? SimpleLetterYOffsetRange : LetterYOffsetRange);
   LetterScaleSpline = GetSpline(simpleLyricsMode ? SimpleLetterScaleRange : LetterScaleRange);
 });
 
@@ -533,7 +528,11 @@ function getSweepGradientPosition(edge: number, x: number, width: number, fade: 
   return Clamp(100 - 150 * rest, -50, 100);
 }
 
-function getSweepLetterPosition(sweep: LineSweep, wordIndex: number, letterIndex: number): number | null {
+function getSweepLetterPosition(
+  sweep: LineSweep,
+  wordIndex: number,
+  letterIndex: number
+): number | null {
   const span = sweep.Spans[wordIndex];
   if (!span?.LetterX || !span.LetterW || letterIndex >= span.LetterX.length) return null;
   return getSweepGradientPosition(
@@ -712,7 +711,11 @@ function setClass(el: HTMLElement, cls: string, on: boolean): boolean {
 // Spicy Lyric Translator puts its rows right after the line they translate and
 // hides the row of every sung line. A line followed by one isn't flagged, so it
 // stays hidden along with its translation rather than showing without it.
-const TRANSLATION_ROW_CLASSES = ["slt-interleaved-translation", "slt-replace-line", "slt-romanization-line"];
+const TRANSLATION_ROW_CLASSES = [
+  "slt-interleaved-translation",
+  "slt-replace-line",
+  "slt-romanization-line",
+];
 const hasTranslationRow = (line: HTMLElement): boolean => {
   const next = line.nextElementSibling;
   return !!next && TRANSLATION_ROW_CLASSES.some((cls) => next.classList.contains(cls));
@@ -772,24 +775,13 @@ function markBackgroundGroups(
   if (!enabled && !bgGroupsMarked) return;
   bgGroupsMarked = enabled;
   let leadState: "NotSung" | "Active" | "Sung" = "NotSung";
-  let moving: boolean | null = null;
   for (const line of lines) {
     const state = getElementState(position, line.StartTime, line.EndTime);
     if (!line.BGLine) {
       leadState = state;
       continue;
     }
-    let open = enabled && (leadState === "Active" || state === "Active");
-    if (
-      enabled &&
-      !open &&
-      leadState === "Sung" &&
-      state === "Sung" &&
-      line.HTMLElement.classList.contains("GroupActive")
-    ) {
-      moving ??= isLyricsListMoving();
-      open = !moving;
-    }
+    const open = enabled && (leadState === "Active" || state === "Active");
     if (setClass(line.HTMLElement, "GroupActive", open) && !line.HTMLElement.isConnected) {
       bgDetachedFlips.push(line.HTMLElement);
     }
@@ -833,11 +825,19 @@ function animateRefreshedDot(
   const el = dot.HTMLElement;
   const elapsed = position - line.StartTime;
   const fill = easeInOutCos(getProgressPercentage(position, dot.StartTime, dot.EndTime));
-  const enter = smoothstep((elapsed - index * RefreshedDots.EnterStaggerMs) / RefreshedDots.EnterMs);
+  const enter = smoothstep(
+    (elapsed - index * RefreshedDots.EnterStaggerMs) / RefreshedDots.EnterMs
+  );
   const opacity = (RefreshedDots.Dim + (RefreshedDots.Lit - RefreshedDots.Dim) * fill) * enter;
   setStyleIfChanged(el, "opacity", `${opacity}`, 0.001);
   setStyleIfChanged(el, "scale", "1", 0.001);
-  setStyleIfChanged(el, "transform", "translate3d(0, calc(var(--DefaultLyricsSize) * 0), 0)", 0.0001, 0);
+  setStyleIfChanged(
+    el,
+    "transform",
+    "translate3d(0, calc(var(--DefaultLyricsSize) * 0), 0)",
+    0.0001,
+    0
+  );
   setStyleIfChanged(el, "--text-shadow-opacity", "0%", 1);
 
   // The group's breath, once per line. On `transform`, since the collapse
@@ -858,7 +858,8 @@ function animateRefreshedDot(
 function resetDotGroupBreath(dot: TimedElement): void {
   const group = dot.HTMLElement.parentElement;
   const prev = group && _styleCache.get(group)?.get("transform");
-  if (group && prev !== undefined && prev !== 1) setStyleIfChanged(group, "transform", "scale(1)", 0, 1);
+  if (group && prev !== undefined && prev !== 1)
+    setStyleIfChanged(group, "transform", "scale(1)", 0, 1);
 }
 
 function flushStyleBatch(): void {
@@ -1158,8 +1159,7 @@ let lastAnimateFrameTime = 0;
 
 export function Animate(position: number): void {
   const ProcessedPosition = position + timeOffset - ($simpleLyricsMode.get() ? 33.5 : 0);
-  const refreshedSimple =
-    $simpleLyricsMode.get() && isExperimentEnabled("refreshedSimpleLyrics");
+  const refreshedSimple = $simpleLyricsMode.get() && isExperimentEnabled("refreshedSimpleLyrics");
   // Read every frame, not once at load: a remote override can flip it mid-song.
   const performanceMode = isExperimentEnabled("performanceMode");
   // Spline point split letters wait at before they're sung: shrunk and low
@@ -1435,24 +1435,48 @@ export function Animate(position: number): void {
             if (performanceMode) {
               if (!isLetterGroup) {
                 if ($simpleLyricsMode.get()) {
-                  setStyleIfChanged(word.HTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                  setStyleIfChanged(
+                    word.HTMLElement,
+                    "--SLM_GradientPosition",
+                    `${targetGradientPos}%`
+                  );
                 } else {
-                  setStyleIfChanged(word.HTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                  setStyleIfChanged(
+                    word.HTMLElement,
+                    "--gradient-position",
+                    `${targetGradientPos}%`
+                  );
                 }
                 if (word.OriginalHTMLElement) {
                   if ($simpleLyricsMode.get()) {
-                    setStyleIfChanged(word.OriginalHTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                    setStyleIfChanged(
+                      word.OriginalHTMLElement,
+                      "--SLM_GradientPosition",
+                      `${targetGradientPos}%`
+                    );
                   } else {
-                    setStyleIfChanged(word.OriginalHTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                    setStyleIfChanged(
+                      word.OriginalHTMLElement,
+                      "--gradient-position",
+                      `${targetGradientPos}%`
+                    );
                   }
                 }
                 continue;
               } else {
                 if (word.OriginalHTMLElement) {
                   if ($simpleLyricsMode.get()) {
-                    setStyleIfChanged(word.OriginalHTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                    setStyleIfChanged(
+                      word.OriginalHTMLElement,
+                      "--SLM_GradientPosition",
+                      `${targetGradientPos}%`
+                    );
                   } else {
-                    setStyleIfChanged(word.OriginalHTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                    setStyleIfChanged(
+                      word.OriginalHTMLElement,
+                      "--gradient-position",
+                      `${targetGradientPos}%`
+                    );
                   }
                 }
               }
@@ -1477,9 +1501,17 @@ export function Animate(position: number): void {
               );
               if (!isLetterGroup) {
                 if ($simpleLyricsMode.get()) {
-                  setStyleIfChanged(word.HTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                  setStyleIfChanged(
+                    word.HTMLElement,
+                    "--SLM_GradientPosition",
+                    `${targetGradientPos}%`
+                  );
                 } else {
-                  setStyleIfChanged(word.HTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                  setStyleIfChanged(
+                    word.HTMLElement,
+                    "--gradient-position",
+                    `${targetGradientPos}%`
+                  );
                 }
                 // Reduce redundant writes using thresholds for smoother performance
                 setStyleIfChanged(
@@ -1497,9 +1529,17 @@ export function Animate(position: number): void {
               }
               if (word.OriginalHTMLElement) {
                 if ($simpleLyricsMode.get()) {
-                  setStyleIfChanged(word.OriginalHTMLElement, "--SLM_GradientPosition", `${targetGradientPos}%`);
+                  setStyleIfChanged(
+                    word.OriginalHTMLElement,
+                    "--SLM_GradientPosition",
+                    `${targetGradientPos}%`
+                  );
                 } else {
-                  setStyleIfChanged(word.OriginalHTMLElement, "--gradient-position", `${targetGradientPos}%`);
+                  setStyleIfChanged(
+                    word.OriginalHTMLElement,
+                    "--gradient-position",
+                    `${targetGradientPos}%`
+                  );
                 }
               }
             }
@@ -1607,12 +1647,7 @@ export function Animate(position: number): void {
               `${4 + 6 * currentGlow}px`,
               0.5
             ); // Match inspiration
-            setStyleIfChanged(
-              word.HTMLElement,
-              "--text-shadow-opacity",
-              `${currentGlow * 90}%`,
-              1
-            ); // Match inspiration
+            setStyleIfChanged(word.HTMLElement, "--text-shadow-opacity", `${currentGlow * 90}%`, 1); // Match inspiration
           }
 
           if (isLetterGroup && word.Letters) {
@@ -1699,7 +1734,7 @@ export function Animate(position: number): void {
 
                   const config = SimpleLyricsMode_LetterEffectsStrengthConfig;
                   const baseScale =
-                  LetterScaleSpline.at(percentageCount) *
+                    LetterScaleSpline.at(percentageCount) *
                     ($simpleLyricsMode.get()
                       ? word.TotalTime > config.LongerThan
                         ? config.Longer.Scale
@@ -1733,7 +1768,7 @@ export function Animate(position: number): void {
                   // Make the falloff much steeper for a bolder active letter scaling
                   const falloff = Math.max(0, 1 / (1 + Math.pow(distance, 2.8)));
                   const glowFalloff = Math.max(0, 1 / (1 + distance * 0.9));
-          
+
                   // Apply the proximity-based animation values
                   targetScale = restingScale + (baseScale - restingScale) * falloff;
                   targetYOffset = restingYOffset + (baseYOffset - restingYOffset) * falloff;
@@ -2480,12 +2515,7 @@ export function Animate(position: number): void {
               `${4 + 6 * currentGlow}px`,
               0.5
             );
-            setStyleIfChanged(
-              dot.HTMLElement,
-              "--text-shadow-opacity",
-              `${currentGlow * 90}%`,
-              1
-            );
+            setStyleIfChanged(dot.HTMLElement, "--text-shadow-opacity", `${currentGlow * 90}%`, 1);
           }
         } else {
           // Existing Line animation (non-dot) -> Refactored to use Spring
@@ -2521,12 +2551,7 @@ export function Animate(position: number): void {
               `${4 + 8 * currentGlow}px`,
               0.5
             );
-            setStyleIfChanged(
-              line.HTMLElement,
-              "--text-shadow-opacity",
-              `${currentGlow * 50}%`,
-              1
-            );
+            setStyleIfChanged(line.HTMLElement, "--text-shadow-opacity", `${currentGlow * 50}%`, 1);
           }
         }
         /* if (Credits?.classList.contains("Active")) {
