@@ -252,6 +252,7 @@ class LyricsVirtualizer {
     align: "start" | "center" | "end" | "auto";
     instant: boolean;
     padding: number;
+    anticipated?: number;
   } | null = null;
   private _cascadeRows = new Map<number, CascadeRow>();
   // scrollTop the ripple is converging on.
@@ -492,7 +493,11 @@ class LyricsVirtualizer {
       for (const { index, prev } of resized) {
         if (index < target.index) moved += (sizeOf(index) ?? prev) - prev;
       }
-      if (Math.abs(moved) >= 1) this._reaimNextFrame(v, target);
+      const anticipated = target.anticipated ?? 0;
+      const absorbed = Math.min(anticipated, Math.max(0, -moved));
+      target.anticipated = anticipated - absorbed;
+      const unpredicted = moved + absorbed;
+      if (Math.abs(unpredicted) >= 1) this._reaimNextFrame(v, target);
     }
     if (toMeasure.length > 0 && this._resizeRAF === null) {
       this._resizeRAF = requestAnimationFrame(() => {
@@ -1275,16 +1280,49 @@ class LyricsVirtualizer {
   }
 
   /**
-   * How much a "•••" interlude line right above `index` will give up. Once the
-   * line after it starts the interlude collapses to nothing, but a scroll to
-   * that line often starts first (Early Scroll, the ripple, Smooth Scrolling).
+   * How much a "•••" interlude line or collapsing background lines right above
+   * `index` will give up. Once the line after them starts, the interlude or
+   * background lines collapse to nothing, but a scroll to that line often
+   * starts first (Early Scroll, the ripple, Smooth Scrolling).
    * Aimed at the line's current place, it would end up this far above centre
    * when the collapse lands, so the scroll aims where the line is going.
    */
   private _collapsingAbove(v: Virtualizer<HTMLElement, HTMLElement>, index: number): number {
-    if (!this._allElements[index - 1]?.classList.contains("musical-line")) return 0;
-    const above = v.measurementsCache[index - 1] as { size: number } | undefined;
-    return above ? above.size : 0;
+    if (index <= 0) return 0;
+    let total = 0;
+
+    if (this._allElements[index - 1]?.classList.contains("musical-line")) {
+      const above = v.measurementsCache[index - 1] as { size: number } | undefined;
+      total += above ? above.size : 0;
+    }
+
+    if (this._bgPop && !this._allElements[index]?.classList.contains("bg-line")) {
+      let bgSize = 0;
+      let i = index - 1;
+      while (i >= 0 && this._allElements[i]?.classList.contains("bg-line")) {
+        const el = this._allElements[i];
+        if (!this._isCollapsedBg(el)) {
+          const cached = v.measurementsCache[i] as { size: number } | undefined;
+          bgSize += cached && cached.size > 0 ? cached.size : this._estimateSize(i);
+        }
+        i--;
+      }
+      if (bgSize > 0) {
+        let leadGapIncrease = 0;
+        if (i >= 0) {
+          const cqw = this._containerWidth / 100;
+          const oldLeadGap = GAP_LINE_TO_BG * cqw;
+          const newLeadGap =
+            this._refreshed && this._gapFontPx > 0
+              ? this._gapFontPx * REFRESHED_GAP_EM
+              : GAP_NORMAL * cqw;
+          leadGapIncrease = Math.max(0, newLeadGap - oldLeadGap);
+        }
+        total += Math.max(0, bgSize - leadGapIncrease);
+      }
+    }
+
+    return total;
   }
 
   getVirtualizer(): Virtualizer<HTMLElement, HTMLElement> | null {
@@ -1933,7 +1971,10 @@ class LyricsVirtualizer {
       this._setConverging(false);
       return;
     }
-    if (retry === 0) this._lastRetryTarget = { index, align, instant, padding };
+    const collapsing = this._collapsingAbove(v, index);
+    if (retry === 0) {
+      this._lastRetryTarget = { index, align, instant, padding, anticipated: collapsing };
+    }
 
     const scrollEl = v.scrollElement;
     if (!scrollEl) {
@@ -1964,7 +2005,7 @@ class LyricsVirtualizer {
     }
 
     const rect = this._getItemRect(v, index);
-    const itemStart = rect.start - this._collapsingAbove(v, index);
+    const itemStart = rect.start - collapsing;
     const itemSize = rect.size;
 
     const containerRect = this._virtualContainer.getBoundingClientRect();
