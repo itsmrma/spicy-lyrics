@@ -3,7 +3,7 @@ import { SpotifyPlayer } from "../components/Global/SpotifyPlayer.ts";
 import PageView from "../components/Pages/PageView.ts";
 import { toast } from "sonner";
 import { getExpireStoreSizeBytes, onExpireStoreChange } from "../modules/Store.ts";
-import fetchLyrics, { LyricsStore } from "./Lyrics/fetchLyrics.ts";
+import fetchLyrics, { LYRICS_STORE_NAME, LyricsStore } from "./Lyrics/fetchLyrics.ts";
 import {
   clearGeniusCache,
   getGeniusCacheStats,
@@ -33,7 +33,7 @@ export async function getAllLyricsCacheStats(): Promise<{
   geniusCount: number;
 }> {
   const [lyricsStats, geniusStats] = await Promise.all([
-    getExpireStoreSizeBytes(["SpicyLyrics_LyricsStore_g2"]),
+    getExpireStoreSizeBytes([LYRICS_STORE_NAME]),
     getGeniusCacheStats(),
   ]);
 
