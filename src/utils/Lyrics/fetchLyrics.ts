@@ -28,7 +28,13 @@ const lyricsCacheLogger = new Logger("Lyrics Cache");
 // stored the payload after ProcessLyrics had derived its transliterations, so a
 // romanization fix never reached a cached track; bumping the version drops those
 // entries. Keep it that way: only raw data in the cache.
-export const LyricsStore = GetExpireStore<any>("SpicyLyrics_LyricsStore_g1", 7, {
+//
+// The name is exported because tools that inspect the cache (size stats) must
+// address the very same store; a copy of the literal drifts silently and reports
+// an empty cache while the real one is full.
+export const LYRICS_STORE_NAME = "SpicyLyrics_LyricsStore_g1";
+
+export const LyricsStore = GetExpireStore<any>(LYRICS_STORE_NAME, 7, {
   Unit: "Days",
   get Duration() {
     return getRemoteConfig().cache.lyricsTtlDays;
