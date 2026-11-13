@@ -28,6 +28,7 @@ const GreekTextTest = /\p{Script=Greek}/u;
 // whole song, a single matching character in an item is enough to romanize it
 // (mirrors the previous "force conversion for the detected branch" behaviour).
 const ItemJapaneseTest = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
+const ItemJapaneseOrMarkTest = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}々ー]/u;
 const ItemChineseTest = /\p{Script=Han}/u;
 const ItemKoreanTest = KoreanTextTest;
 const ItemCyrillicTest = /\p{Script=Cyrillic}/u;
@@ -38,14 +39,11 @@ const ResidualScriptTest =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Cyrillic}\p{Script=Greek}]/u;
 
 // Load Packages
-RetrievePackage("pinyin", "4.0.0", "mjs")
-  .catch(() => {});
+RetrievePackage("pinyin", "4.0.0", "mjs").catch(() => {});
 
-RetrievePackage("aromanize", "1.0.0", "js")
-  .catch(() => {});
+RetrievePackage("aromanize", "1.0.0", "js").catch(() => {});
 
-RetrievePackage("GreekRomanization", "1.0.0", "js")
-  .catch(() => {});
+RetrievePackage("GreekRomanization", "1.0.0", "js").catch(() => {});
 
 type RomanizationBranch = "Japanese" | "Chinese" | "Korean" | "Cyrillic" | "Greek";
 
@@ -197,8 +195,7 @@ const gatherText = (
   // franc analyses lead text only (so Language detection is unchanged); script
   // detection additionally considers background vocals, which are romanized too.
   const francText = textLines.join("\n");
-  const scriptText =
-    bgTextLines.length > 0 ? `${francText}\n${bgTextLines.join("\n")}` : francText;
+  const scriptText = bgTextLines.length > 0 ? `${francText}\n${bgTextLines.join("\n")}` : francText;
   return { francText, scriptText, entries };
 };
 
@@ -304,10 +301,10 @@ const romanizeEntry = async (
     target.TransliteratedText = text;
     line.HasTransliterations = true;
     if (ResidualScriptTest.test(text)) {
-      romanizationLogger.warn(
-        "Incomplete romanization (original-script characters remain)",
-        { original: target.Text, romanized: text }
-      );
+      romanizationLogger.warn("Incomplete romanization (original-script characters remain)", {
+        original: target.Text,
+        romanized: text,
+      });
     }
   }
 
@@ -319,26 +316,36 @@ const romanizeEntry = async (
 // already translated stay untouched, but still feed the line's context.
 const romanizeJapaneseGroup = async (group: RomanizeEntry[]): Promise<boolean> => {
   if (group.every((entry) => hasTransliteration(entry.target))) return false;
-  if (
-    !group.some((entry) =>
-      ItemJapaneseTest.test((entry.target.Text ?? "").normalize("NFKC"))
-    )
-  ) {
+  if (!group.some((entry) => ItemJapaneseTest.test((entry.target.Text ?? "").normalize("NFKC")))) {
     return false;
   }
 
   const romanized = await RomanizeJapaneseSyllables(
-    group.map((entry) => entry.target.Text ?? "")
+    group.map((entry) => ({
+      text: entry.target.Text ?? "",
+      isPartOfWord: entry.target.IsPartOfWord,
+    }))
   );
 
   let applied = false;
   group.forEach((entry, index) => {
     if (hasTransliteration(entry.target)) return;
-    if (!ItemJapaneseTest.test((entry.target.Text ?? "").normalize("NFKC"))) return;
 
     const item = romanized[index];
     const text = typeof item === "string" ? item : item?.text;
     const isPartOfWord = typeof item === "object" ? item?.isPartOfWord : undefined;
+    const hasJapaneseOrMark = ItemJapaneseOrMarkTest.test(
+      (entry.target.Text ?? "").normalize("NFKC")
+    );
+
+    if (!hasJapaneseOrMark) {
+      // Preserve word boundary spacing when a Latin/digit syllable ran right into
+      // a Japanese particle/word in the source (e.g. "IQが" -> "IQ ga").
+      if (entry.target.IsPartOfWord === true && isPartOfWord === false) {
+        entry.target.RomanizedIsPartOfWord = false;
+      }
+      return;
+    }
 
     // Punctuation and Latin text come back unchanged; there is nothing to show.
     if (text === undefined || text === "" || text === entry.target.Text) return;
@@ -351,10 +358,10 @@ const romanizeJapaneseGroup = async (group: RomanizeEntry[]): Promise<boolean> =
     applied = true;
 
     if (ResidualScriptTest.test(text)) {
-      romanizationLogger.warn(
-        "Incomplete romanization (original-script characters remain)",
-        { original: entry.target.Text, romanized: text }
-      );
+      romanizationLogger.warn("Incomplete romanization (original-script characters remain)", {
+        original: entry.target.Text,
+        romanized: text,
+      });
     }
   });
 
