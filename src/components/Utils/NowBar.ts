@@ -2,7 +2,12 @@ import BlobURLMaker from "../../utils/BlobURLMaker.ts";
 import { GetCurrentLyricsContainerInstance } from "../../utils/Lyrics/Applyer/CreateLyricsContainer.ts";
 import { FormatPlaybackTime, SongProgressBar } from "./../../utils/Lyrics/SongProgressBar.ts";
 import { QueueForceScroll, ResetLastLine } from "../../utils/Scrolling/ScrollToActiveLine.ts";
-import { $showVolumeSlider, $timelineOutsideMediaContent } from "../../utils/stores.ts";
+import {
+  $releaseYearPosition,
+  $showVolumeSlider,
+  $timelineOutsideMediaContent,
+} from "../../utils/stores.ts";
+import { GetReleaseYear, PeekReleaseYear, type ReleaseYearQuery } from "../../utils/releaseYear.ts";
 import { onExperimentChange } from "../../utils/experiments.ts";
 import { $isNowBarOpen, $nowBarSide } from "../../utils/uiState.ts";
 import Global from "../Global/Global.ts";
@@ -20,6 +25,9 @@ import { IsCompactMode } from "./CompactMode.ts";
 import { Maid } from "../../modules/Maid.ts";
 import Scheduler from "../../modules/Scheduler.ts";
 import Whentil from "../../modules/Whentil.ts";
+import Logger from "../../utils/Logger.ts";
+
+const nowBarLogger = new Logger("Now Bar");
 
 // Spicetify's wrapper rescans every element's computed style on each childList
 // mutation, and textContent always replaces the text node. Editing it in place doesn't.
@@ -479,7 +487,7 @@ function OpenNowBar(skipSaving: boolean = false) {
 
         const SliderBar = TimelineElem.querySelector<HTMLElement>(".SliderBar");
         if (!SliderBar) {
-          console.error("Could not find SliderBar element");
+          nowBarLogger.error("Could not find SliderBar element");
           return null;
         }
 
@@ -519,7 +527,7 @@ function OpenNowBar(skipSaving: boolean = false) {
           const DurationElem = TimelineElem.querySelector<HTMLElement>(".Time.Duration");
 
           if (!PositionElem || !DurationElem || !SliderBar) {
-            console.error("Missing required elements for timeline update");
+            nowBarLogger.error("Missing required elements for timeline update");
             return;
           }
 
@@ -751,6 +759,7 @@ function OpenNowBar(skipSaving: boolean = false) {
                     <div class="VolumeFill"></div>
                     <div class="Handle"></div>
                     <div class="VolumeIcon">${Icons.Volume}</div>
+                    <div class="VolumeMaxIcon">${Icons.VolumeFull}</div>
                 `;
 
         // Same trick the Heart uses — the SVG would otherwise swallow the clicks
@@ -765,7 +774,7 @@ function OpenNowBar(skipSaving: boolean = false) {
 
         const IconElement = VolumeElement.querySelector<HTMLElement>(".VolumeIcon");
         if (!IconElement) {
-          console.error("Could not find VolumeControl elements");
+          nowBarLogger.error("Could not find VolumeControl elements");
           return null;
         }
 
@@ -814,7 +823,7 @@ function OpenNowBar(skipSaving: boolean = false) {
             }
             Spicetify.Player.setVolume(level);
           } catch (err) {
-            console.error("Spicy Lyrics: couldn't set the volume", err);
+            nowBarLogger.error("Couldn't set the volume", err);
           }
         };
 
@@ -1385,7 +1394,7 @@ async function getAVCStreamUrl(manifestUrl: string) {
                 }
 
             }).catch(err => {
-                console.error("Error while getting EditorialArtwork", err);
+                nowBarLogger.error("Error while getting EditorialArtwork", err);
             })
     }
 
@@ -1418,6 +1427,56 @@ async function navigateFromFullscreen(pathname: string) {
 // Each UpdateNowBar takes a token for its delayed metadata swap; a later update
 // (fast skipping) makes the earlier one's pending timers no-ops.
 let metadataUpdateToken = 0;
+
+function ReleaseYearQueryForPlaying(): ReleaseYearQuery | null {
+  if (SpotifyPlayer.GetContentType() === "episode") return null;
+  const uri = SpotifyPlayer.GetUri();
+  if (!uri) return null;
+  return {
+    uri,
+    title: SpotifyPlayer.GetName() ?? "",
+    artist: SpotifyPlayer.GetArtists()?.[0]?.name ?? "",
+    album: SpotifyPlayer.GetAlbumName() ?? "",
+  };
+}
+
+/**
+ * Puts the release year inside the artists' scrolling span, before or after the names, so it
+ * moves with them when a long list scrolls. Until the year is known a hidden "0000" holds its
+ * room, so the row doesn't shift when it arrives.
+ */
+function SyncReleaseYear() {
+  const marquee = PageContainer?.querySelector<HTMLElement>(
+    ".ContentBox .NowBar .Header .Metadata .Artists > span"
+  );
+  if (!marquee) return;
+  marquee.querySelector(".ReleaseYear")?.remove();
+
+  const position = $releaseYearPosition.get();
+  const query = ReleaseYearQueryForPlaying();
+  if (position === "off" || !query) return;
+
+  const known = PeekReleaseYear(query.uri);
+  if (known === null) return;
+
+  const label = document.createElement("span");
+  label.className = `ReleaseYear ${position === "left" ? "Before" : "After"}`;
+  label.textContent = known ?? "0000";
+  if (known === undefined) label.classList.add("Pending");
+  if (position === "left") marquee.prepend(label);
+  else marquee.append(label);
+  if (known !== undefined) return;
+
+  GetReleaseYear(query).then((year) => {
+    if (!label.isConnected || SpotifyPlayer.GetUri() !== query.uri) return;
+    if (!year) {
+      label.remove();
+      return;
+    }
+    label.textContent = year;
+    label.classList.remove("Pending");
+  });
+}
 
 function UpdateNowBar(force = false) {
   const NowBar = PageContainer?.querySelector(".ContentBox .NowBar");
@@ -1453,6 +1512,11 @@ function UpdateNowBar(force = false) {
   //const SongName = NowBar.querySelector(".Header .Metadata .SongName");
 
   if (!$isNowBarOpen.get() && !force) return;
+
+  // Started now so the year is often known by the time the metadata swaps in.
+  const releaseYearQuery =
+    $releaseYearPosition.get() !== "off" ? ReleaseYearQueryForPlaying() : null;
+  if (releaseYearQuery) void GetReleaseYear(releaseYearQuery);
 
   const coverArt = SpotifyPlayer.GetCover("xlarge");
 
@@ -1629,6 +1693,7 @@ function UpdateNowBar(force = false) {
         if (span) span.textContent = artists.map((artist) => artist.name).join(", ");
       }
     }
+    SyncReleaseYear();
 
     setTimeout(() => {
       if (metadataToken !== metadataUpdateToken) return;
@@ -1654,8 +1719,12 @@ function NowBar_SwapSides() {
 }
 
 function ApplySideSwap() {
+  // Listeners measure before and after, so what sits on the lyrics side (the queue, QueueView.ts)
+  // can slide across with the lyrics instead of jumping.
+  Global.Event.evoke("nowbar:side-swap:before", null);
   $nowBarSide.set($nowBarSide.get() === "right" ? "left" : "right");
   Session_NowBar_SetSide();
+  Global.Event.evoke("nowbar:side-swap:after", null);
 }
 
 // The side the page shows: the stored one, except that compact mode and the centred
@@ -1832,6 +1901,8 @@ $timelineOutsideMediaContent.subscribe(() => {
 // The band is built inside OpenNowBar's fullscreen block, so toggling the setting
 // has to rebuild the overlay components rather than just show/hide an element.
 // `.listen` (not `.subscribe`) — this must not fire on module load.
+$releaseYearPosition.listen(() => SyncReleaseYear());
+
 $showVolumeSlider.listen(() => {
   if (!Fullscreen.IsOpen) return;
   CleanUpActiveComponents();

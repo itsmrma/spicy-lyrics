@@ -69,6 +69,14 @@
   will-change: transform, scale, opacity;
 }
 
+/* Bloom: the last split word's letters are still rising and falling when their
+   line ends. They keep their layers until they come to rest (.Settling, set by
+   the animator); repainted into the line instead, they'd shimmer as they scale. */
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line.Settling .letterGroup,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line.Settling .letter {
+  will-change: transform, scale, opacity;
+}
+
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line,
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .word,
 #SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .letter {
@@ -86,19 +94,19 @@
   initial-value: -50%;
 }
 
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line,
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line .word,
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line .letter {
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line .word,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line .letter {
   --gradient-alpha: 1;
   --gradient-alpha-end: 0.3;
 }
 
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
   .line
   .word:not(.dot),
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line .letter {
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line .letter {
   --SLM_GradientPosition: -50%;
   --gradient-position: var(--SLM_GradientPosition, -50%) !important;
   --gradient-offset: 30% !important;
@@ -116,7 +124,7 @@
   );
 }
 
-/* Refreshed Simple Lyrics (experiment). The sung edge is a fade of fixed width
+/* Bloom renderer. The sung edge is a fade of fixed width
    (--SLR_FadeWidth, in em) instead of half the word, so short and long words
    light up alike. The gradient is drawn on an image of 2 × the word + the fade
    (bright half, fade, dim half) and slid across by background-position, which
@@ -125,17 +133,17 @@
    from it, so words and letters share one fade width (RefreshedSweep.FadeEm in
    LyricsAnimator.ts) and the fade runs on across them. The part still to come
    stays a little brighter than before. */
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode.Exp_RefreshedSimpleLyrics
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
   .line.Active
   .word:not(.dot),
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode.Exp_RefreshedSimpleLyrics
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
-  .line.Active
+  .line:is(.Active, .Settling)
   .letter {
-  --SLR_FadeWidth: 0.55em;
+  --SLR_FadeWidth: 0.882em;
   background-image: linear-gradient(
     to right,
     rgba(255, 255, 255, var(--gradient-alpha)) calc(50% - var(--SLR_FadeWidth) / 2),
@@ -146,11 +154,16 @@
   background-position: calc((100% - var(--SLM_GradientPosition)) / 1.5) 0;
 }
 
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode.Exp_RefreshedSimpleLyrics
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
   .line.Active:not(.bg-line)
-  :is(.word:not(.dot), .letter) {
+  :is(.word:not(.dot), .letter),
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
+  .LyricsContainer
+  .LyricsContent
+  .line.Settling:not(.bg-line)
+  .letter {
   --gradient-alpha-end: 0.4;
 }
 
@@ -158,7 +171,7 @@
    animated. Here they wait as plain text like the words around them, so a
    split word doesn't grow into place as its line starts. Sung lines are left
    alone: the last word's letters settle there after the line ends. */
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode.Exp_RefreshedSimpleLyrics
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
   .line:not(.Active, .Sung)
@@ -168,18 +181,29 @@
   translate: none !important;
 }
 
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode.Exp_RefreshedSimpleLyrics
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
-  .line.Sung
+  .line.Sung:not(.Settling)
   .letter {
   text-shadow:
     0 0 var(--BlurAmount, 0)
       rgba(var(--gradient-color), var(--gradient-color), var(--gradient-color), var(--gradient-alpha)),
-    0 0 var(--text-shadow-blur-radius) rgba(255, 255, 255, var(--text-shadow-opacity));
+    0 0 var(--text-shadow-blur-radius)
+      rgba(255, 255, 255, calc(var(--text-shadow-opacity) * var(--SLR_SungAlpha, 1)));
 }
 
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode.Exp_RefreshedSimpleLyrics
+/* Split letters grow from their baseline, not the middle of their box. */
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
+  .LyricsContainer
+  .LyricsContent
+  .line
+  .letterGroup
+  .letter {
+  transform-origin: 50% 80%;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
   .line.rtl.Active
@@ -254,7 +278,7 @@
   direction: ltr;
 }
 
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line {
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line {
   --Vocal-NotSung-opacity: 0.45;
   --Vocal-Sung-opacity: 0.35;
 }
@@ -536,7 +560,7 @@
   /* animation: MusicalLineScaleLoop 5s cubic-bezier(.35,.29,.51,1.11) infinite; */
 }
 
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
   .line.musical-line
@@ -555,7 +579,7 @@
   line-height: 0.65;
 }
 
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
   .line.musical-line
@@ -602,7 +626,7 @@
 } */
 
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .SongInfo {
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo {
   /* Sizing scheme: see the .Credits note. */
   font-size: clamp(0.75rem, 3.3cqw, max(0.35em, 0.9375rem)) !important;
   font-weight: 600;
@@ -619,8 +643,8 @@
   scale: 1.02;
 } */
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .SongInfo .Uploader,
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .SongInfo .Maker {
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .Uploader,
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .Maker {
   font-size: 1em !important;
   display: flex;
   flex-direction: row;
@@ -628,8 +652,8 @@
 }
 
 /* Avatars are sized in `em` so they stay proportional to the name beside them. */
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .SongInfo .Uploader img,
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .SongInfo .Maker img {
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .Uploader img,
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .Maker img {
   width: 1.3em;
   height: 1.3em;
   border-radius: 50%;
@@ -686,7 +710,7 @@
 #SpicyLyricsPage.SpicyRenderer
   .LyricsContainer
   .SpicyLyricsScrollContainer[data-lyrics-type="Static"] {
-  --DefaultLyricsSize: clamp(0.8rem, calc(1cqw * 5), 2.5rem);
+  --DefaultLyricsSize: calc(clamp(0.8rem, calc(1cqw * 5), 2.5rem) * var(--SL-LyricsScale, 1));
 }
 
 /* Popup (PiP) static lyrics: kept intentionally a touch smaller than synced
@@ -699,10 +723,12 @@
   .SpicyLyricsScrollContainer[data-lyrics-type="Static"] {
   /* Bounded by height and narrow widths the same way as the synced popup
      size (Lyrics/main.css). */
-  --DefaultLyricsSize: clamp(
-    1rem,
-    min(max(1.4rem, 6vw), 7vh, 7vw),
-    2.3rem
+  --DefaultLyricsSize: calc(
+    clamp(
+      1rem,
+      min(max(1.4rem, 6vw), 7vh, 7vw),
+      2.3rem
+    ) * var(--SL-LyricsScale, 1)
   );
 }
 
@@ -809,7 +835,21 @@
   scale: 0;
 }
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.musical-line.Active {
+/* Bloom: the interlude swells, shrinks and fades itself out
+   (LyricsAnimator.ts), so the collapse's scale stays out of it until the line
+   ends. */
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
+  .LyricsContainer
+  .LyricsContent
+  .line.musical-line.Active.pre-hidden
+  .dotGroup {
+  scale: 1;
+}
+
+/* Bloom opens an interlude as its scroll brings it in, ahead of its time
+   (BloomFocus, ScrollToActiveLine.ts); the dots fade in when it starts. */
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.musical-line.Active,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line.musical-line.BloomFocus {
   opacity: 1;
   /* Restore natural height when active so the virtualizer can remeasure it
      via the MutationObserver in LyricsVirtualizer.ts.
@@ -819,12 +859,12 @@
   line-height: var(--lyrics-line-height) !important;
 }
 
-/* #SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line,
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line .word,
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line .letterGroup,
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line .letterGroup .letter,
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line .dotGroup,
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode .LyricsContainer .LyricsContent .line .dotGroup .dot {
+/* #SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line .word,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line .letterGroup,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line .letterGroup .letter,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line .dotGroup,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line .dotGroup .dot {
   --BlurAmount: 0px !important;
 } */
 
@@ -916,7 +956,7 @@
   margin: 0;
 } */
 
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
   .LyricsContainer
   .LyricsContent
   .SpicyLyricsScrollContainer[data-lyrics-type="Line"]
@@ -948,23 +988,24 @@
   font-weight: 600 !important;
 }
 
-/* Background Vocal Pop-Out (experiment, Refreshed Simple Lyrics only). A
+/* Background Vocal Pop-Out (experiment, Bloom only). A
    background line takes no space until it or its lead line is sung
    (GroupActive, set in LyricsAnimator.ts),
    then slides out from under the lead while the rows below glide down to make
    room (the virtualizer's layout glide, same duration and curve). Collapsed it
    keeps overflow visible, so on the way out the text fades over the rows
    gliding up instead of being cut off. The reveal is on `transform`, which
-   nothing else sets on a line; Minimal Lyrics Mode drives `scale` and
+   nothing else sets on a line; Fade Away Previous Lines drives `scale` and
    `opacity`. The selectors carry .SpicyLyricsScrollContainer and the :not()s
-   so their transition outranks Minimal Lyrics Mode's `!important` one. */
-#SpicyLyricsPage.SpicyRenderer.SimpleLyricsMode.Exp_RefreshedSimpleLyrics.Exp_BackgroundLinePop {
+   so their transition outranks Fade Away Previous Lines's `!important` one. */
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer.Exp_BackgroundLinePop {
   & .LyricsContainer .LyricsContent .SpicyLyricsScrollContainer .line.bg-line:not(.musical-line):not(.static) {
     transform-origin: left top !important;
     transition:
       transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
       opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1),
-      scale 0.4s ease-in-out !important;
+      scale 0.4s ease-in-out,
+      --SLR_SungAlpha 0.35s cubic-bezier(0.39, 0.575, 0.565, 1) 0.25s !important;
   }
 
   /* Opening (a line opens NotSung, with its lead): the fade waits for the rows
@@ -974,7 +1015,8 @@
     transition:
       transform 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s,
       opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1) 0.1s,
-      scale 0.4s ease-in-out !important;
+      scale 0.4s ease-in-out,
+      --SLR_SungAlpha 0.35s cubic-bezier(0.39, 0.575, 0.565, 1) 0.25s !important;
   }
 
   & .LyricsContainer .LyricsContent .SpicyLyricsScrollContainer .line.bg-line:is(.OppositeAligned, .rtl):not(.musical-line):not(.static) {
@@ -1007,7 +1049,7 @@
   }
 }
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .Credits {
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .Credits {
   /* Follows the .LyricsContent width (`cqw`, it's a size container), capped at
      a ratio of the lyrics size. `em` is the parent's font-size, which the
      scroll container inherits as var(--DefaultLyricsSize) from .LyricsContent.
@@ -1024,7 +1066,7 @@
 }
 
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .LyricsProvider {
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .LyricsProvider {
   /* Sizing scheme: see the .Credits note. */
   font-size: clamp(0.7rem, 3cqw, max(0.34em, 0.875rem)) !important;
   font-weight: 600 !important;
@@ -1036,7 +1078,7 @@
 
 /* Sits under "Provided by" inside the same element, so it inherits its opacity and alignment.
    Lighter weight and tight leading keep it reading as part of that line, not a new row. */
-#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer .LyricsContent .LyricsProvider .LyricsProviderVia {
+#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .LyricsProvider .LyricsProviderVia {
   display: block;
   font-size: max(0.85em, 0.65rem);
   font-weight: 500 !important;
@@ -1044,12 +1086,12 @@
   opacity: 0.85;
 }
 
-#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer .LyricsContent .LyricsProvider .LyricsProviderVia::first-letter {
+#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .LyricsProvider .LyricsProviderVia::first-letter {
   text-transform: uppercase;
 }
 
 /* The source's site, linked from its name. Same tone and weight as the "via" around it; a faint underline marks it as a link. */
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .LyricsProvider .LyricsProviderViaLink {
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .LyricsProvider .LyricsProviderViaLink {
   color: inherit;
   font-weight: inherit !important;
   text-decoration: underline;
@@ -1061,21 +1103,21 @@
     text-decoration-color 0.21s;
 }
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .LyricsProvider .LyricsProviderViaLink:is(:hover, :focus-visible) {
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .LyricsProvider .LyricsProviderViaLink:is(:hover, :focus-visible) {
   color: var(--on-material-text-primary, white);
   text-decoration-color: currentColor;
 }
 
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .LyricsProvider .LyricsProviderViaLabel {
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .LyricsProvider .LyricsProviderViaLabel {
   font-weight: inherit !important;
 }
 
 /* Without the refined credits, label and value read as one sentence: "Written by: ...". */
-#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer .LyricsContent .CreditsLabel::after {
+#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .CreditsLabel::after {
   content: ":";
 }
 
-#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer .LyricsContent :is(.SongInfoNote, .SongInfoRole) {
+#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) :is(.SongInfoNote, .SongInfoRole) {
   opacity: 0.5;
 }
 
@@ -1101,7 +1143,7 @@
 }
 
 /* A button, reset to read as text; the role in front stays out of the underline. */
-#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .SongInfo .song-info-profile-section {
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .song-info-profile-section {
   display: flex;
   align-items: center;
   padding: 0;
@@ -1114,26 +1156,26 @@
   cursor: pointer;
 }
 
-#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer .LyricsContent .SongInfo .SongInfoRole {
+#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .SongInfoRole {
   margin-inline-end: 0.25em;
   font-weight: 600 !important;
 }
 
-#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer .LyricsContent .SongInfo .song-info-profile-section :is(.SongInfoName, img) {
+#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .song-info-profile-section :is(.SongInfoName, img) {
   opacity: 0.55;
   transition: opacity 0.21s;
 }
 
-#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer .LyricsContent .SongInfo .SongInfoName {
+#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .SongInfoName {
   text-decoration: underline;
 }
 
-#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer .LyricsContent .SongInfo .song-info-profile-section:is(:hover, :focus-visible) :is(.SongInfoName, img) {
+#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .song-info-profile-section:is(:hover, :focus-visible) :is(.SongInfoName, img) {
   opacity: 1;
 }
 
 /* The community lead belongs to the refined credits; the previous look keeps its full sentence. */
-#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer .LyricsContent .SongInfo .SongInfoLead {
+#SpicyLyricsPage.SpicyRenderer:not(.Exp_RefinedCredits) .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongInfo .SongInfoLead {
   display: none;
 }
 
@@ -1142,7 +1184,7 @@
    surface. The gap stays smaller than the one between lyric lines, so they read as the song's
    footnote, and the tones stay near the old credit lines so they never outshine the song. The virtualizer owns the block's translate
    and transform, so its own motion is opacity. */
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits {
   /* Both tones are a share of the row's colour, so a theme that recolours the rows sets the
      hue while the credits keep their strength, and labels stay quieter than the names. */
   --CreditsText: color-mix(in srgb, currentColor 70%, transparent);
@@ -1178,7 +1220,7 @@
   margin-inline-start: auto;
 }
 
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits > :is(.Credits, .LyricsProvider, .SongInfo) {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits > :is(.Credits, .LyricsProvider, .SongInfo) {
   font-size: 1em !important;
   font-weight: 600 !important;
   margin: 0 !important;
@@ -1188,48 +1230,48 @@
 }
 
 /* The lyrics set every descendant to 700 !important (main.css); text inside the rows takes the row's weight. */
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits :is(.CreditsLabel, .CreditsValue, .LyricsProviderVia, .SongInfoLead, .Maker, .Uploader, .song-info-profile-section, .SongInfoRole) {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits :is(.CreditsLabel, .CreditsValue, .LyricsProviderVia, .SongInfoLead, .Maker, .Uploader, .song-info-profile-section, .SongInfoRole) {
   font-weight: inherit !important;
 }
 
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .Credits .CreditsValue {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .Credits .CreditsValue {
   color: var(--CreditsText);
 }
 
 /* Everything but the songwriters and the linked names reads muted. */
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits :is(.CreditsLabel, .LyricsProvider .CreditsValue, .LyricsProviderViaLabel, .SongInfoLead, .SongInfoRole),
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .SongInfo :is(.Maker, .Uploader)::before {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits :is(.CreditsLabel, .LyricsProvider .CreditsValue, .LyricsProviderViaLabel, .SongInfoLead, .SongInfoRole),
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .SongInfo :is(.Maker, .Uploader)::before {
   color: var(--CreditsMuted);
 }
 
 /* The second line: "Provided by Apple Music via lrc.red", or "Community lyrics · Made by @..." */
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits > :is(.LyricsProvider, .SongInfo) {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits > :is(.LyricsProvider, .SongInfo) {
   font-size: max(0.86em, 0.75rem) !important;
   font-weight: 500 !important;
 }
 
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits.FromCommunity > .LyricsProvider,
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .SongInfoNote {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits.FromCommunity > .LyricsProvider,
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .SongInfoNote {
   display: none;
 }
 
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .SongInfo {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .SongInfo {
   display: block;
 }
 
 /* Each person stays whole on one line; the dot before them separates, outside the link. */
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .SongInfo :is(.Maker, .Uploader) {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .SongInfo :is(.Maker, .Uploader) {
   display: inline;
   white-space: nowrap;
 }
 
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .SongInfo :is(.Maker, .Uploader)::before {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .SongInfo :is(.Maker, .Uploader)::before {
   content: "\00b7";
   margin-inline: 0.45em;
 }
 
 /* Role, avatar, then the name; only the name reads as a link. */
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .song-info-profile-section {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .song-info-profile-section {
   display: inline-flex;
   align-items: center;
   gap: 0.3em;
@@ -1238,7 +1280,7 @@
   border-radius: 0.25em;
 }
 
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .song-info-profile-section img {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .song-info-profile-section img {
   order: 1;
   width: 1.15em;
   height: 1.15em;
@@ -1247,7 +1289,7 @@
   opacity: 0.85;
 }
 
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits :is(.SongInfoName, .LyricsProviderViaLink) {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits :is(.SongInfoName, .LyricsProviderViaLink) {
   order: 2;
   color: var(--CreditsText);
   font-weight: 600 !important;
@@ -1260,13 +1302,13 @@
     text-decoration-color var(--dur-fast) ease;
 }
 
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .song-info-profile-section:is(:hover, :focus-visible) .SongInfoName,
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits .LyricsProviderViaLink:is(:hover, :focus-visible) {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .song-info-profile-section:is(:hover, :focus-visible) .SongInfoName,
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits .LyricsProviderViaLink:is(:hover, :focus-visible) {
   color: white;
   text-decoration-color: currentColor;
 }
 
-#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer .LyricsContent .SongCredits :is(.song-info-profile-section, .LyricsProviderViaLink):focus-visible {
+#SpicyLyricsPage.SpicyRenderer.Exp_RefinedCredits .LyricsContainer :is(.LyricsContent, .LyricsPinnedCredits) .SongCredits :is(.song-info-profile-section, .LyricsProviderViaLink):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -1294,4 +1336,265 @@
   opacity: 1;
   scale: 1.05;
   backdrop-filter: blur(2px);
+}
+/* Romanization under each line (RomanizedRow.ts). The row sits inside its line
+   on a flex row of its own, so it fades, blurs and scales with the line and the
+   virtualizer measures it with the line. It is 0.6 of the line's size and
+   0.65 of its brightness, and dims and brightens with the line (a syllable
+   row also sweeps while active, below):
+   its state colours here, the line's eased opacity around it. It sits close
+   under the line so it reads as part of it: 0.06 of the line's size above,
+   0.18 below (in the row's em: / 0.6), and nothing below when the line's own
+   background vocal follows, so it stays as close as it is without the row.
+   It paints itself with the same transparent fill and shadow as the line;
+   its opacity gives it a layer of its own, so the gradient a line-synced or
+   static line clips to its text doesn't reach it. */
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .RomanizedRow {
+  --RomanizedAlpha: var(--gradient-alpha-end);
+  flex: 0 0 100%;
+  min-width: 0;
+  font-size: 0.6em;
+  margin: 0.1em 0 0.3em;
+  opacity: 0.65;
+  direction: ltr;
+  text-align: start;
+  overflow-wrap: anywhere;
+  -webkit-text-fill-color: transparent;
+  background-image: none;
+  text-shadow: 0 0 var(--BlurAmount, 0) rgba(255, 255, 255, var(--RomanizedAlpha));
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .RomanizedRow.BeforeBackground {
+  margin-bottom: 0;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.bg-line .RomanizedRow {
+  --gradient-alpha: 0.6;
+  --gradient-alpha-end: 0.3;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line:is(.OppositeAligned, .rtl) .RomanizedRow {
+  text-align: right;
+  transform-origin: right top;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line:is(.Active, .Sung, .static) .RomanizedRow {
+  --RomanizedAlpha: var(--gradient-alpha);
+}
+
+/* An active syllable row lights each syllable's romanization from left to right
+   over its sung time (--RomanizedPosition, set by RomanizedRow.ts), on the same
+   gradient as the line's words; dim ahead of it, lit behind. */
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.Active .RomanizedRow.Timed {
+  text-shadow: none;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line.Active .RomanizedRow.Timed .RomanizedPiece {
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  background-image: linear-gradient(
+    to right,
+    rgba(255, 255, 255, var(--gradient-alpha)) var(--RomanizedPosition, -20%),
+    rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--RomanizedPosition, -20%) + 20%)
+  );
+}
+
+/* The rows are built with romanization off too, and the toggle only flips
+   RomanizedRowsShown on the page. Turned on, each row slides out from under its
+   line while the lines below glide down to make room (the virtualizer's layout
+   glide), as a background vocal opens. Turned off, it takes no space at once
+   and fades over the lines gliding up, keeping overflow visible so the text
+   isn't cut off on the way out. */
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .RomanizedRow {
+  transform-origin: left top;
+  transition:
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s,
+    opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1) 0.1s;
+}
+
+#SpicyLyricsPage.SpicyRenderer:not(.RomanizedRowsShown) .LyricsContainer .LyricsContent .line .RomanizedRow {
+  height: 0 !important;
+  margin: 0 !important;
+  overflow: visible;
+  pointer-events: none;
+  opacity: 0 !important;
+  transform: translateY(-0.6em) scale(0.8);
+  transition:
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.12s ease-out;
+}
+
+/* Bloom colours. Every line rests at one dim tone, the part being sung lights
+   up to nearly white, and a finished line dims back to rest a moment after
+   it ends. Background vocals light up less. Line opacity stays at 1 so the
+   tones are the text's own and don't compound with it. */
+@property --SLR_SungAlpha {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.18;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line {
+  --SLR_Lit: 0.94;
+  --SLR_Unlit: 0.18;
+  --Vocal-NotSung-opacity: 1;
+  --Vocal-Sung-opacity: 1;
+  --SLR_SungAlpha: var(--SLR_Unlit);
+  transition: --SLR_SungAlpha 0.35s cubic-bezier(0.39, 0.575, 0.565, 1) 0.25s;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line.bg-line {
+  --SLR_Lit: 0.35;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line.Active {
+  --SLR_SungAlpha: var(--SLR_Lit);
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line:not(.musical-line),
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line:not(.musical-line) .word,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line:not(.musical-line) .letter {
+  --gradient-alpha: var(--SLR_Lit);
+  --gradient-alpha-end: var(--SLR_Unlit) !important;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line.Sung:not(.musical-line),
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line.Sung:not(.musical-line) .word,
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line.Sung:not(.musical-line) .letter {
+  --gradient-alpha: var(--SLR_SungAlpha);
+}
+
+/* With Fade Away Previous Lines the lines still to come keep their shrink but
+   not their extra dimming, which would halve the rest tone; a sung line kept
+   on screen beside the one being sung shows at the rest tone too. */
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContainer
+  .LyricsContent:not(.HideLineBlur)
+  .line.NotSung:not(.musical-line),
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer.Fullscreen.MinimalLyricsMode.Exp_KeepOverlappingLines:not(.CompactMode)
+  .LyricsContainer
+  .LyricsContent:not(.HideLineBlur)
+  .line.Sung.SungAfterActive:not(.musical-line) {
+  opacity: 1;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContainer
+  .LyricsContent:not(.HideLineBlur)
+  .line.Active
+  + .line.Sung:not(.musical-line) {
+  opacity: 1 !important;
+}
+
+/* Bloom line scale: lines rest a little smaller and the line being sung grows
+   to full size from its bottom leading corner, after a short wait; it shrinks
+   back quicker when it ends. Not while Fade Away Previous Lines drives the
+   scale in Fullscreen and Cinema View. Background vocals pop out on their own. */
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer:is(:not(.Fullscreen.MinimalLyricsMode), .CompactMode)
+  .LyricsContainer
+  .LyricsContent
+  .SpicyLyricsScrollContainer
+  .line:not(.musical-line, .bg-line, .static) {
+  scale: 0.98;
+  transform-origin: left bottom !important;
+  transition:
+    scale 0.35s cubic-bezier(0.4, 0.1, 0, 1) 0.05s,
+    --SLR_SungAlpha 0.35s cubic-bezier(0.39, 0.575, 0.565, 1) 0.25s;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer:is(:not(.Fullscreen.MinimalLyricsMode), .CompactMode)
+  .LyricsContainer
+  .LyricsContent
+  .SpicyLyricsScrollContainer
+  .line:is(.Active, .BloomFocus):not(.musical-line, .bg-line, .static) {
+  scale: 1;
+  transition:
+    scale 0.5s cubic-bezier(0.4, 0.1, 0, 1) 0.15s,
+    --SLR_SungAlpha 0.35s cubic-bezier(0.39, 0.575, 0.565, 1) 0.25s;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer:is(:not(.Fullscreen.MinimalLyricsMode), .CompactMode)
+  .LyricsContainer
+  .LyricsContent
+  .SpicyLyricsScrollContainer
+  :is(.line.OppositeAligned:not(.rtl), .line.rtl:not(.OppositeAligned)):not(.musical-line, .bg-line, .static) {
+  transform-origin: right bottom !important;
+}
+
+/* Bloom: a split letter's glow dims with the letter, so a letter not yet lit
+   doesn't sit in a bright haze. --SLR_LetterLit is the letter's own tone
+   (LyricsAnimator.ts). */
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer .LyricsContainer .LyricsContent .line:is(.Active, .Settling) .letter {
+  text-shadow: 0 0 var(--text-shadow-blur-radius)
+    rgba(255, 255, 255, calc(var(--text-shadow-opacity) * var(--SLR_LetterLit, 1)));
+}
+
+/* Fade Away Previous Lines' transition list is `!important`; under Bloom it
+   also carries the dimming of a finished line. */
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContainer
+  .LyricsContent
+  .line:not(.musical-line, .bg-line) {
+  transition:
+    scale 0.4s ease-in-out,
+    opacity 0.4s linear,
+    --SLR_SungAlpha 0.35s cubic-bezier(0.39, 0.575, 0.565, 1) 0.25s !important;
+}
+
+/* Bloom, line-synced lyrics: a line has no words to fill, so it lights up as a
+   whole. Every state draws the text the same way, in --SLR_SungAlpha, so the
+   tone can fade instead of switching from the rest look to the lit gradient in
+   one frame: up in 0.3 s as the line starts and down in 0.4 s as it ends. The
+   line-synced `.line` rule's `!important` transition list (scale and opacity
+   only) would drop the fade, so these lists are `!important` too. */
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer
+  .LyricsContainer
+  .SpicyLyricsScrollContainer[data-lyrics-type="Line"]
+  .line:not(.musical-line) {
+  background-image: none !important;
+  text-shadow: 0 0 var(--BlurAmount, 0) rgba(255, 255, 255, var(--SLR_SungAlpha)) !important;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer:is(:not(.Fullscreen.MinimalLyricsMode), .CompactMode)
+  .LyricsContainer
+  .LyricsContent
+  .SpicyLyricsScrollContainer[data-lyrics-type="Line"]
+  .line:not(.musical-line, .static) {
+  transition:
+    scale 0.35s cubic-bezier(0.4, 0.1, 0, 1) 0.05s,
+    opacity 0.2s cubic-bezier(0.37, 0, 0.63, 1),
+    --SLR_SungAlpha 0.4s cubic-bezier(0.33, 0, 0.2, 1) !important;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer:is(:not(.Fullscreen.MinimalLyricsMode), .CompactMode)
+  .LyricsContainer
+  .LyricsContent
+  .SpicyLyricsScrollContainer[data-lyrics-type="Line"]
+  .line:is(.Active, .BloomFocus):not(.musical-line, .static) {
+  transition:
+    scale 0.5s cubic-bezier(0.4, 0.1, 0, 1) 0.15s,
+    opacity 0.2s cubic-bezier(0.37, 0, 0.63, 1),
+    --SLR_SungAlpha 0.3s cubic-bezier(0.33, 0, 0.2, 1) !important;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContainer
+  .LyricsContent
+  .SpicyLyricsScrollContainer[data-lyrics-type="Line"]
+  .line:not(.musical-line) {
+  transition:
+    scale 0.4s ease-in-out,
+    opacity 0.4s linear,
+    --SLR_SungAlpha 0.4s cubic-bezier(0.33, 0, 0.2, 1) !important;
+}
+
+#SpicyLyricsPage.SpicyRenderer.BloomRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContainer
+  .LyricsContent
+  .SpicyLyricsScrollContainer[data-lyrics-type="Line"]
+  .line.Active:not(.musical-line) {
+  transition:
+    scale 0.4s ease-in-out,
+    opacity 0.4s linear,
+    --SLR_SungAlpha 0.3s cubic-bezier(0.33, 0, 0.2, 1) !important;
 }
