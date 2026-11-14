@@ -307,10 +307,10 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
             if (reparsed) {
               const refreshed = { ...reparsed, uri, temporaryUpload: true, uploadedTTML: lyricsData.uploadedTTML };
               await ProcessLyrics(refreshed);
+              if (isStaleFetch(uri)) return [refreshed, 200];
               // Something saved meanwhile (another upload) is newer, so answer with that. Its own
               // fetch was turned away while this one held the in-flight lock.
               if ($currentLyricsData.get() !== savedLyricsData) return runFetchLyrics(uri);
-              if (isStaleFetch(uri)) return [refreshed, 200];
               lyricsData = refreshed;
               $currentLyricsData.set(JSON.stringify(lyricsData));
             }
