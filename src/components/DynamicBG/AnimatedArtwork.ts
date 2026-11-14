@@ -1,5 +1,6 @@
 import "../../css/AnimatedArtwork.css";
 import { getRemoteConfig } from "../../utils/remoteConfig.ts";
+import { onExperimentChange } from "../../utils/experiments.ts";
 import { $motionArtwork } from "../../utils/stores.ts";
 import Global from "../Global/Global.ts";
 import { SpotifyPlayer } from "../Global/SpotifyPlayer.ts";
@@ -348,6 +349,10 @@ Global.Event.listen("nowbar:close", syncPlayback);
 Global.Event.listen("canvas-stage:change", () => void Refresh());
 Global.Event.listen("motion-artwork:verdict", () => void Refresh());
 $motionArtwork.listen(() => void Refresh());
+// Performance Mode keeps the cover still, even with animated artwork enabled.
+onExperimentChange((experiment) => {
+  if (experiment.id === "performanceMode") void Refresh();
+});
 // Moving the page into or out of fullscreen re-parents it, which pauses its videos.
 const onLayoutMove = () =>
   setTimeout(() => {

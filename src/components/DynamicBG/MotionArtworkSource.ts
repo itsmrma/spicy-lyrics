@@ -1,4 +1,5 @@
 import { getRemoteConfig } from "../../utils/remoteConfig.ts";
+import { isExperimentEnabled } from "../../utils/experiments.ts";
 import { $motionArtwork } from "../../utils/stores.ts";
 import Global from "../Global/Global.ts";
 import { SpotifyFetch } from "../Global/SpotifyFetch.ts";
@@ -12,9 +13,13 @@ const ALBUM_METADATA_URL = (gid: string) =>
   `https://spclient.wg.spotify.com/metadata/4/album/${gid}?market=from_token`;
 const SIGNED_URL_CACHE_SIZE = 64;
 
-/** The setting and the remote kill switch. */
+/** The setting, the remote kill switch, and Performance Mode's static-cover path. */
 export function IsMotionArtworkEnabled(): boolean {
-  return $motionArtwork.get() && getRemoteConfig().animatedArtwork.enabled;
+  return (
+    $motionArtwork.get() &&
+    getRemoteConfig().animatedArtwork.enabled &&
+    !isExperimentEnabled("performanceMode")
+  );
 }
 
 export function PlayingAlbumId(): string | null {

@@ -792,7 +792,7 @@ Global.Event.listen("compact-mode:disable", () => void Refresh());
 Global.Event.listen("nowbar:open", () => void Refresh());
 Global.Event.listen("nowbar:close", () => void Refresh());
 onExperimentChange((experiment) => {
-  if (experiment.id === "canvasImmersive") void Refresh();
+  if (experiment.id === "canvasImmersive" || experiment.id === "performanceMode") void Refresh();
 });
 $backgroundStyle.listen(() => void Refresh());
 Global.Event.listen("motion-artwork:verdict", () => void Refresh());
