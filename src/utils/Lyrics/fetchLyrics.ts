@@ -5,11 +5,12 @@ import { SpotifyPlayer } from "../../components/Global/SpotifyPlayer.ts";
 import PageView, { PageContainer } from "../../components/Pages/PageView.ts";
 import { Query, QueryHttpError, QueryNetworkError } from "../API/Query.ts";
 import { IsTripStatus, ServiceUnavailableError } from "../API/CircuitBreaker.ts";
-import { ProcessLyrics } from "./ProcessLyrics.ts";
+import { JapaneseRomajiIsCurrent, ProcessLyrics } from "./ProcessLyrics.ts";
 import { enrichLyricsWithGeniusSingers } from "./Genius/GeniusSingerAttribution.ts";
 import { IsEmptyLyrics } from "./EmptyLines.ts";
 import Logger from "../Logger.ts";
 import { LocalLyricsManager } from "./manager/index.ts";
+import { ParseTTML } from "./manager/parseTTML.ts";
 import { LyricsQueueRetry } from "./LyricsQueueRetry.ts";
 import { SetShownNotice, SyncNoLyricsLayout } from "./LyricsNotice.ts";
 import { GetExpireStore } from "../../modules/Store.ts";
@@ -17,6 +18,7 @@ import { SLObjPack } from "../objpack.ts";
 import { HideLyricsSkeleton, IsLyricsSkeletonEnabled, ShowLyricsSkeleton } from "./LyricsSkeleton.ts";
 import { onExperimentChange } from "../experiments.ts";
 import { getRemoteConfig } from "../remoteConfig.ts";
+import { ClearPinnedCredits } from "./Applyer/Credits/PinnedCredits.ts";
 
 const lyricsLogger = new Logger("Lyrics Pipeline");
 const lyricsCacheLogger = new Logger("Lyrics Cache");
@@ -125,6 +127,30 @@ function noteFailure(uri: string, source: string, detail?: unknown): void {
 /** The last failure recorded for `uri`, or `null` if its last fetch didn't fail. */
 export function GetLastLyricsFailure(uri: string | undefined): LyricsFetchFailure | null {
   return uri && lastFailure?.uri === uri ? lastFailure : null;
+}
+
+/** Which stage last served lyrics, for the bug report: a cached copy is the usual suspect. */
+let lastAnswer: { uri: string; from: "already loaded" | "Local DB" | "cache" | "API" } | null = null;
+
+/** Where `uri`'s lyrics came from, or `null` if it hasn't been served lyrics. */
+export function GetLyricsAnsweredFrom(uri: string | undefined): string | null {
+  return uri && lastAnswer?.uri === uri ? lastAnswer.from : null;
+}
+
+/**
+ * Whether `uri` is showing a "Just once" TTML upload. It exists only in
+ * `$currentLyricsData`, so clearing that to refetch would replace it with the
+ * song's normal lyrics.
+ */
+export function HoldsTemporaryUpload(uri: string | undefined): boolean {
+  const saved = $currentLyricsData.get();
+  if (!uri || !saved.startsWith("{")) return false;
+  try {
+    const data = JSON.parse(saved);
+    return data?.temporaryUpload === true && data.uri === uri;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -237,6 +263,12 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
     return ["dj", 400];
   }
 
+  // Ads (music ads, podcast pre-rolls) can be audio or video, so this goes before the media checks.
+  if (SpotifyPlayer.GetContentType() === "ad") {
+    $currentlyFetching.set(false);
+    return ["ad", 400];
+  }
+
   const mediaType = SpotifyPlayer.GetMediaType();
 
   if (
@@ -273,7 +305,8 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
   // Check if there's already data in localStorage
   const savedLyricsData = $currentLyricsData.get();
 
-  if (savedLyricsData && !isDev) {
+  // Dev builds always refetch, except for an upload that nothing could refetch.
+  if (savedLyricsData && (!isDev || HoldsTemporaryUpload(uri))) {
     try {
       if (savedLyricsData.startsWith("NO_LYRICS:")) {
         // Sentinel format is `NO_LYRICS:<uri>`. The uri itself contains colons,
@@ -285,11 +318,31 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
           return ["lyrics-not-found", 404];
         }
       } else {
-        const lyricsData = JSON.parse(savedLyricsData);
+        let lyricsData = JSON.parse(savedLyricsData);
         // Return the stored lyrics if the URI matches the current track URI
         if (lyricsData?.uri === uri) {
+          // A "Just once" upload made with the other Japanese spelling is romanized again
+          // from its own TTML, since its processed syllables keep the old romaji.
+          if (
+            lyricsData.temporaryUpload === true &&
+            typeof lyricsData.uploadedTTML === "string" &&
+            !JapaneseRomajiIsCurrent(lyricsData)
+          ) {
+            const reparsed = ParseTTML(lyricsData.uploadedTTML);
+            if (reparsed) {
+              const refreshed = { ...reparsed, uri, temporaryUpload: true, uploadedTTML: lyricsData.uploadedTTML };
+              await ProcessLyrics(refreshed);
+              if (isStaleFetch(uri)) return [refreshed, 200];
+              // Something saved meanwhile (another upload) is newer, so answer with that. Its own
+              // fetch was turned away while this one held the in-flight lock.
+              if ($currentLyricsData.get() !== savedLyricsData) return runFetchLyrics(uri);
+              lyricsData = refreshed;
+            }
+          }
           await enrichWithSingers(lyricsData);
           $currentLyricsData.set(JSON.stringify(lyricsData));
+          // Shown again: keep where they first came from, when that's known.
+          if (lastAnswer?.uri !== uri) lastAnswer = { uri, from: "already loaded" };
           presentLyrics(lyricsData);
           return [lyricsData, 200];
         }
@@ -309,6 +362,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
     await ProcessLyrics(lyricsData);
     await enrichWithSingers(lyricsData);
     if (isStaleFetch(uri)) return [lyricsData, 200];
+    lastAnswer = { uri, from: "Local DB" };
     $currentLyricsData.set(JSON.stringify(lyricsData));
     presentLyrics(lyricsData);
     return [lyricsData, 200];
@@ -326,7 +380,8 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
   if (LyricsStore) {
     try {
       const lyricsFromCacheRes = await LyricsStore.GetItem(trackId);
-      if (lyricsFromCacheRes) {
+      // Romaji in the other Japanese spelling is fetched and romanized again.
+      if (lyricsFromCacheRes && JapaneseRomajiIsCurrent(lyricsFromCacheRes)) {
         if (lyricsFromCacheRes?.Value === "NO_LYRICS") {
           $currentlyFetching.set(false);
           noteFailure(uri, "lyrics cache");
@@ -342,6 +397,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
         // whatever an older build derived.
         await ProcessLyrics(lyricsFromCache);
         await enrichWithSingers(lyricsFromCache);
+        lastAnswer = { uri, from: "cache" };
         $currentLyricsData.set(JSON.stringify(lyricsFromCache));
         presentLyrics(lyricsFromCache);
         return [{ ...lyricsFromCache, fromCache: true }, 200];
@@ -505,7 +561,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
     // is running then.
     const rawLyrics = structuredClone(lyrics);
 
-    await ProcessLyrics(lyrics);
+    const romanizedInFull = await ProcessLyrics(lyrics);
     await enrichWithSingers(lyrics);
 
     // Pruning blank lines can empty out a payload the API still counted as a
@@ -527,7 +583,9 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
     // has skipped on, the next play of this track gets a cache hit. Only the raw
     // payload goes in: ProcessLyrics derives transliterations in place, and
     // caching those is what kept a romanization fix from reaching old tracks.
-    if (LyricsStore) {
+    // Lyrics whose romanization was cut short (the Japanese dictionary still
+    // loading, say) aren't cached, so the next play romanizes them in full.
+    if (LyricsStore && romanizedInFull) {
       try {
         rawLyrics.uri = uri;
         await LyricsStore.SetItem(trackId, rawLyrics);
@@ -538,6 +596,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
 
     if (isStaleFetch(uri)) return [{ ...lyrics, fromCache: false }, 200];
 
+    lastAnswer = { uri, from: "API" };
     $currentLyricsData.set(JSON.stringify(lyrics));
     presentLyrics(lyrics);
     return [{ ...lyrics, fromCache: false }, 200];
@@ -691,4 +750,5 @@ export function ClearLyricsPageContainer(): void {
   if (lyricsContent) {
     lyricsContent.innerHTML = "";
   }
+  ClearPinnedCredits();
 }

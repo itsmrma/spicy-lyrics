@@ -23,8 +23,10 @@ export interface SettingDef {
    */
   useNote?: () => string | false;
   Control?: React.FC<{ disabled: boolean; label: string }>;
+  /** A small control at the right of the label, for stacked rows (e.g. what the slider below edits). */
+  Aside?: React.FC<{ disabled: boolean }>;
   /** Renders the whole row instead of `Control` (experiments bring their own badge). */
-  render?: (label: React.ReactNode) => React.ReactNode;
+  render?: (label: React.ReactNode, searching: boolean) => React.ReactNode;
 }
 
 export interface GroupDef {
@@ -40,6 +42,8 @@ export type SectionId =
   | "appearance"
   | "experiments"
   | "advanced"
+  | "reviewer"
+  | "bug"
   | "about";
 
 export interface SectionDef {

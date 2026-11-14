@@ -3,8 +3,11 @@ import {
   $lyricsContainerExists,
   $scrollLeadEnabled,
   $scrollLeadMs,
+  $showScrollToActive,
   $smoothScrolling,
+  $staticAutoScroll,
 } from "../../utils/stores.ts";
+import { GetStaticPace, type StaticPace } from "./StaticPace.ts";
 import Global from "../../components/Global/Global.ts";
 import { SpotifyPlayer } from "../../components/Global/SpotifyPlayer.ts";
 import { PageContainer } from "../../components/Pages/PageView.ts";
@@ -15,16 +18,24 @@ import {
   LyricsObject,
   type LyricsSyllable,
   type LyricsType,
+  setEarlySungBefore,
 } from "../Lyrics/lyrics.ts";
+import { createTooltip } from "../tooltip.ts";
 import { ScrollIntoCenterViewCSS } from "../ScrollIntoView/Center.ts";
 import { ScrollIntoTopViewCSS } from "../ScrollIntoView/Top.ts";
 import {
   getLyricsVirtualizer,
+  clearLyricsScrollFraction,
+  fadesAwayPreviousLines,
+  lyricsCenterScrollTopAt,
+  setLyricsScrollPosition,
   lyricsUseRefreshedLayout,
   scrollLyricsToIndex,
+  setBloomScrollDuration,
 } from "../Lyrics/LyricsVirtualizer.ts";
 import { isExperimentEnabled } from "../experiments.ts";
 import { IsScrollbarDragging } from "./Simplebar/ScrollSimplebar.ts";
+import { IsBGLine, PickScrollLineIndex } from "./ScrollTarget.ts";
 
 // Define intersection types that include _LineIndex
 type LyricsLineWithIndex = LyricsLine & { _LineIndex: number };
@@ -47,6 +58,7 @@ let smoothForceScrollQueued = false;
 let currentSimpleBarInstance: any | null = null;
 let wheelHandler: (() => void) | null = null;
 let touchMoveHandler: (() => void) | null = null;
+let scrollHandler: (() => void) | null = null;
 // --- END NEW ---
 
 const wasDrasticPositionChange = (lastPosition: number, newPosition: number) => {
@@ -54,8 +66,12 @@ const wasDrasticPositionChange = (lastPosition: number, newPosition: number) => 
   return positionChange > 1000;
 };
 
-// Add focus event listener to reset state when window is focused
-window.addEventListener("focus", ResetLastLine);
+// Add focus event listener to reset state when window is focused, unless a hand scroll has the
+// lyrics elsewhere: the click that focuses the window can be on a line out there, and the reset
+// would scroll it out from under the pointer before the click lands.
+window.addEventListener("focus", () => {
+  if (!isUserScrolling) ResetLastLine();
+});
 // Add resize event listener to reset state when window is resized
 window.addEventListener("resize", ResetLastLine);
 
@@ -74,9 +90,230 @@ function setupLyricsContentObserver() {
   }
 }
 
+// Scroll to Active button: shown while a hand scroll has auto-scroll held off with the line
+// being sung out of view, on the side that line lies. Clicking it hands scrolling back.
+type ActiveLineDirection = "Above" | "Below";
+let scrollToActiveButton: HTMLButtonElement | null = null;
+let shownDirection: ActiveLineDirection | null = null;
+// Unsynced lyrics glide back from a click instead of jumping, however far away they are.
+let staticReturning = false;
+
+const ScrollToActiveIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
+
+// Where the Lyrics / Queue switch is up (QueueView.ts), the button takes a seat in its capsule, which
+// opens to fit it (QueueView.css). Everywhere else it floats at the lyrics column's edge.
+function ScrollToActiveHome(): { container: HTMLElement; seat: boolean } | null {
+  const seat = PageContainer?.querySelector<HTMLElement>(".ContentBox > .ViewSwitch .ViewSwitchSeat_Scroll");
+  if (seat) return { container: seat, seat: true };
+  const container = PageContainer?.querySelector<HTMLElement>(".LyricsContainer");
+  return container ? { container, seat: false } : null;
+}
+
+let scrollToActiveTooltip: { destroy?: () => void; setContent?: (content: string) => void } | null =
+  null;
+
+function DropScrollToActiveButton() {
+  scrollToActiveTooltip?.destroy?.();
+  scrollToActiveTooltip = null;
+  scrollToActiveButton?.remove();
+  scrollToActiveButton = null;
+}
+
+// The switch is built and taken down with the view controls; the button moves with it, keeping
+// whatever it was showing.
+Global.Event.listen("view-switch:changed", () => {
+  const direction = shownDirection;
+  if (scrollToActiveButton && scrollToActiveButton.parentElement !== ScrollToActiveHome()?.container)
+    DropScrollToActiveButton();
+  shownDirection = null;
+  SetScrollToActiveDirection(direction);
+});
+
+function GetScrollToActiveButton(): HTMLButtonElement | null {
+  const home = ScrollToActiveHome();
+  if (!home) return null;
+  const container = home.container;
+  if (scrollToActiveButton?.parentElement === container) return scrollToActiveButton;
+  DropScrollToActiveButton();
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = home.seat ? "ViewSwitchScroll" : "ScrollToActive";
+  button.innerHTML = ScrollToActiveIcon;
+  button.inert = true;
+  if (home.seat)
+    scrollToActiveTooltip = createTooltip(button, {
+      ...(Spicetify as any).TippyProps,
+      placement: "top",
+      content: "Scroll to the current line",
+    });
+  button.addEventListener("click", () => {
+    lastUserScrollTime = 0;
+    if ($currentLyricsType.get() === "Static") staticReturning = true;
+    else ScrollBackToLine();
+    // Going inert would drop keyboard focus to the page; keep it on the lyrics instead.
+    if (document.activeElement === button)
+      (currentSimpleBarInstance?.getScrollElement() as HTMLElement | undefined)?.focus({
+        preventScroll: true,
+      });
+    SetScrollToActiveDirection(null);
+  });
+  // It sits outside the scroller, so a wheel over it would otherwise scroll nothing.
+  button.addEventListener(
+    "wheel",
+    (event) => {
+      const scrollElement = currentSimpleBarInstance?.getScrollElement() as HTMLElement | undefined;
+      if (!scrollElement) return;
+      event.preventDefault();
+      // Lets the hand-scroll listeners on the scroller see it.
+      scrollElement.dispatchEvent(new WheelEvent("wheel", event));
+      const lines = event.deltaMode === WheelEvent.DOM_DELTA_LINE;
+      const pages = event.deltaMode === WheelEvent.DOM_DELTA_PAGE;
+      scrollElement.scrollBy(0, event.deltaY * (lines ? 40 : pages ? scrollElement.clientHeight : 1));
+    },
+    { passive: false }
+  );
+  // After .LyricsContent, the anchor it is pinned to.
+  container.appendChild(button);
+  scrollToActiveButton = button;
+  return button;
+}
+
+function SetScrollToActiveDirection(direction: ActiveLineDirection | null) {
+  if (direction && !$showScrollToActive.get()) direction = null;
+  if (direction === shownDirection) return;
+  shownDirection = direction;
+  const button = direction ? GetScrollToActiveButton() : scrollToActiveButton;
+  if (!button) return;
+  // Keeps its side while it fades out.
+  if (direction) {
+    const appearing = !button.classList.contains("Visible");
+    button.classList.toggle("Above", direction === "Above");
+    button.ariaLabel =
+      direction === "Above" ? "Scroll up to the current line" : "Scroll down to the current line";
+    scrollToActiveTooltip?.setContent?.(button.ariaLabel);
+    // In the capsule the chevron turns when the line crosses sides while it's up. Coming back on
+    // the other side it has to start out pointing the new way, not turn around in view: settle the
+    // hidden state's (untransitioned) rotation before it shows.
+    if (appearing) void getComputedStyle(button.firstElementChild ?? button).rotate;
+  }
+  button.classList.toggle("Visible", direction !== null);
+  button.inert = direction === null;
+  // The capsule opens its seat (and wakes, a wheel scroll doesn't move the pointer) while it's shown.
+  button.closest<HTMLElement>(".ViewSwitch")?.classList.toggle("HasScroll", direction !== null);
+}
+
+// Where the line being sung lies, or null while it is in view. An IntersectionObserver on the line
+// reports it the frame it crosses the edge, from layout the browser has already done. The resume
+// check's isConnected can't: it counts rows mounted in the overscan, off-screen, as in view.
+let sideObserver: IntersectionObserver | null = null;
+let sideRoot: HTMLElement | null = null;
+let sideLine: HTMLElement | null = null;
+let side: ActiveLineDirection | null = null;
+let sideRefreshFrame: number | null = null;
+let sideItem: EnhancedLyricsItem | null = null;
+
+// Shown only while a hand scroll holds auto-scroll off, so the glide back from a click (whose
+// scroll keeps the line out of view until it lands) never brings it up again.
+function ShowActiveLineSide() {
+  SetScrollToActiveDirection(isUserScrolling && allowForceScrolling ? side : null);
+}
+
+function StopObservingActiveLine() {
+  if (sideRefreshFrame !== null) cancelAnimationFrame(sideRefreshFrame);
+  sideRefreshFrame = null;
+  sideObserver?.disconnect();
+  sideObserver = null;
+  sideRoot = null;
+  sideLine = null;
+  side = null;
+  sideItem = null;
+}
+
+function ObserveActiveLine(container: HTMLElement, LineElem: HTMLElement) {
+  if (!sideObserver || sideRoot !== container) {
+    StopObservingActiveLine();
+    sideRoot = container;
+    sideObserver = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (!entry?.rootBounds || entry.target !== sideLine) return;
+        const { boundingClientRect: line, rootBounds: view } = entry;
+        side = line.bottom <= view.top ? "Above" : line.top >= view.bottom ? "Below" : null;
+        ShowActiveLineSide();
+      },
+      { root: container, threshold: 0 }
+    );
+  }
+  if (sideLine === LineElem) return;
+  if (sideLine) sideObserver.unobserve(sideLine);
+  // side keeps the last answer until this line's first entry, so a line change while scrolled
+  // away doesn't blink the button.
+  sideLine = LineElem;
+  sideObserver.observe(LineElem);
+}
+
+// A scroll can carry the line from one side of the view to the other without crossing it, which
+// the observer doesn't report; observing it again asks for a fresh entry.
+function RefreshActiveLineSide() {
+  if (!sideObserver || sideRefreshFrame !== null) return;
+  sideRefreshFrame = requestAnimationFrame(() => {
+    sideRefreshFrame = null;
+    if (!sideObserver || !sideLine?.isConnected) return;
+    sideObserver.unobserve(sideLine);
+    sideObserver.observe(sideLine);
+  });
+}
+
+function TrackActiveLineSide(container: HTMLElement, line: EnhancedLyricsItem) {
+  sideItem = line;
+  const LineElem = line.HTMLElement as HTMLElement | undefined;
+  if (LineElem?.isConnected) {
+    ObserveActiveLine(container, LineElem);
+  } else {
+    // An unmounted row has no box; the virtualizer's mounted range says which side it is on.
+    if (sideLine) sideObserver?.unobserve(sideLine);
+    sideLine = null;
+    const items = getLyricsVirtualizer()?.getVirtualItems() ?? [];
+    const first = items[0]?.index;
+    const last = items[items.length - 1]?.index;
+    side =
+      first === undefined || last === undefined
+        ? null
+        : line._LineIndex < first
+          ? "Above"
+          : line._LineIndex > last
+            ? "Below"
+            : null;
+  }
+  ShowActiveLineSide();
+}
+
+// Glides to the line the button points at and hands scrolling back. Scrolled straight from here,
+// because a queued scroll waits for a line being sung, which the intro doesn't have.
+function ScrollBackToLine() {
+  const container = currentSimpleBarInstance?.getScrollElement() as HTMLElement | undefined;
+  const LineElem = sideItem?.HTMLElement as HTMLElement | undefined;
+  if (!container || !sideItem || !LineElem || !allowForceScrolling) return;
+  isUserScrolling = false;
+  lastLine = LineElem;
+  PageContainer?.querySelector(".LyricsContainer .LyricsContent")?.classList.remove("HideLineBlur");
+  ScrollTo(container, LineElem, false, GetScrollType(), sideItem._LineIndex, true);
+}
+
+// Between lines, the next one to be sung; after the last, the last.
+function LineAfter(
+  Lines: LyricsLine[] | LyricsSyllable[],
+  position: number
+): EnhancedLyricsItem | null {
+  const next = Lines.findIndex((line) => line.StartTime > position && !IsBGLine(line));
+  const index = next !== -1 ? next : Lines.length - 1;
+  return index >= 0 ? ({ ...Lines[index], _LineIndex: index } as EnhancedLyricsItem) : null;
+}
+
 function handleUserScroll(ScrollSimplebar: any | null) {
   // Allow null
   if (!ScrollSimplebar) return; // Add null check
+  staticReturning = false;
   if (!isUserScrolling) {
     isUserScrolling = true;
     // Add HideLineBlur class when user starts scrolling
@@ -103,6 +340,7 @@ export function InitializeScrollEvents(ScrollSimplebar: any) {
   currentSimpleBarInstance = ScrollSimplebar;
   wheelHandler = () => handleUserScroll(currentSimpleBarInstance);
   touchMoveHandler = () => handleUserScroll(currentSimpleBarInstance);
+  scrollHandler = RefreshActiveLineSide;
   // --- END NEW ---
 
   // Setup the observer
@@ -110,111 +348,76 @@ export function InitializeScrollEvents(ScrollSimplebar: any) {
 
   // Add scroll event listener
   const scrollElement = ScrollSimplebar?.getScrollElement();
-  if (scrollElement && wheelHandler && touchMoveHandler) {
+  if (scrollElement && wheelHandler && touchMoveHandler && scrollHandler) {
     // Check handlers exist
     // Remove potential old listeners first (optional, but safer if called multiple times)
     scrollElement.removeEventListener("wheel", wheelHandler);
     scrollElement.removeEventListener("touchmove", touchMoveHandler);
+    scrollElement.removeEventListener("scroll", scrollHandler);
     // Add new listeners
     scrollElement.addEventListener("wheel", wheelHandler);
     scrollElement.addEventListener("touchmove", touchMoveHandler);
+    scrollElement.addEventListener("scroll", scrollHandler, { passive: true });
   }
 }
 
 /**
- * How far ahead — counted in real lyric lines, background lines excluded — we
- * look when deciding whether the highest active line may keep the anchor.
- * Bump to 3 to let long lines hold the anchor for longer.
+ * Bloom's timed scroll: a move into a line takes longer the more room there is
+ * before it, from MinMs when the line follows straight on to MaxMs after a
+ * pause, and starts that long before the line so it arrives as it's sung.
  */
-const PIN_LOOKAHEAD = 2;
+const BloomScroll = { MinMs: 480, MaxMs: 750, GapFromMs: 200, GapToMs: 750 };
 
-/** Only Syllable lines carry BGLine; line-synced lyrics have no background lines. */
-const IsBGLine = (line: LyricsLine | LyricsSyllable): boolean =>
-  (line as LyricsSyllable).BGLine === true;
+// Where a line's own singing ends. Fade Away Previous Lines stretches EndTime
+// to the next line; LeadEndTime keeps the real end.
+const GetLeadEndTime = (line: LyricsLine | LyricsSyllable): number =>
+  (line as { LeadEndTime?: number }).LeadEndTime ?? line.EndTime;
 
-/** Background lines belong to the lead line above them, and are never a scroll target. */
-const ResolveToLeadIndex = (Lines: LyricsLine[] | LyricsSyllable[], index: number): number => {
-  let i = index;
-  while (i > 0 && IsBGLine(Lines[i])) i--;
-  return i;
-};
-
-/** When the lead line at `leadIdx` and its background lines have all finished. */
-const GetGroupEndTime = (Lines: LyricsLine[] | LyricsSyllable[], leadIdx: number): number => {
-  let end = Lines[leadIdx].EndTime;
-  for (let i = leadIdx + 1; i < Lines.length && IsBGLine(Lines[i]); i++) {
-    if (Lines[i].EndTime > end) end = Lines[i].EndTime;
+// How long the move into the next line takes (Ms), and how far ahead of it
+// the scroll may start (LeadMs): never before the line above, with its
+// background vocals, has finished singing, so nothing is cut off.
+const GetBloomScroll = (
+  Lines: LyricsLine[] | LyricsSyllable[],
+  position: number
+): { Ms: number; LeadMs: number } => {
+  let next = -1;
+  for (let i = 0; i < Lines.length; i++) {
+    if (!IsBGLine(Lines[i]) && Lines[i].StartTime > position) {
+      next = i;
+      break;
+    }
   }
-  return end;
+  if (next < 0) return { Ms: BloomScroll.MaxMs, LeadMs: 0 };
+  let prevEnd = -Infinity;
+  for (let i = next - 1; i >= 0; i--) {
+    const end = GetLeadEndTime(Lines[i]);
+    if (end > prevEnd) prevEnd = end;
+    if (!IsBGLine(Lines[i])) break;
+  }
+  const room = Lines[next].StartTime - prevEnd;
+  const gap = Math.min(BloomScroll.GapToMs, Math.max(BloomScroll.GapFromMs, room));
+  const share = (gap - BloomScroll.GapFromMs) / (BloomScroll.GapToMs - BloomScroll.GapFromMs);
+  const ms = Math.round(BloomScroll.MinMs + (BloomScroll.MaxMs - BloomScroll.MinMs) * share);
+  return { Ms: ms, LeadMs: Math.min(ms, Math.max(0, room)) };
 };
 
-/** The PIN_LOOKAHEAD-th non-background line after `leadIdx`, or null past the end. */
-const GetLookaheadLine = (Lines: LyricsLine[] | LyricsSyllable[], leadIdx: number) => {
-  let remaining = PIN_LOOKAHEAD;
-  for (let i = leadIdx + 1; i < Lines.length; i++) {
-    if (IsBGLine(Lines[i])) continue;
-    if (--remaining === 0) return Lines[i];
-  }
-  return null;
+// The line Bloom's timed scroll is bringing in. It grows to full size as it
+// arrives, rather than when its first word is sung (Mixed.css).
+let bloomFocus: HTMLElement | null = null;
+const SetBloomFocus = (el: HTMLElement | null) => {
+  if (el === bloomFocus) return;
+  bloomFocus?.classList.remove("BloomFocus");
+  bloomFocus = el;
+  el?.classList.add("BloomFocus");
 };
+
 
 const GetScrollLine = (Lines: LyricsLine[] | LyricsSyllable[], ProcessedPosition: number) => {
   if ($currentLyricsType.get() === "Static" || $currentLyricsType.get() === "None" || !Lines)
     return;
-  // 1) gather the indices of all active lines. This runs every animation frame,
-  // so we keep indices rather than materialising a copy of each active line.
-  const activeIndices: number[] = [];
-  for (let i = 0; i < Lines.length; i++) {
-    const line = Lines[i];
-    if (
-      typeof line.StartTime === "number" &&
-      typeof line.EndTime === "number" &&
-      line.StartTime <= ProcessedPosition &&
-      line.EndTime >= ProcessedPosition
-    ) {
-      activeIndices.push(i);
-    }
-  }
-
-  if (activeIndices.length === 0) return null;
-
-  const enhance = (index: number) =>
-    ({ ...Lines[index], _LineIndex: index }) as EnhancedLyricsItem;
-
-  // 2) collapse the active lines onto their lead groups. A background line that
-  // still has another active group below it is only the tail of a line we have
-  // already moved past — a sustained "oooh" outliving its own lead — so it is
-  // dropped rather than dragging the anchor back up. A background line with
-  // nothing active below it is kept: it may be leading into its own line, which
-  // starts later than the background vocal does.
-  let frontLead = -1;
-  for (const index of activeIndices) {
-    const lead = ResolveToLeadIndex(Lines, index);
-    if (lead > frontLead) frontLead = lead;
-  }
-
-  // Ascending and deduplicated — ResolveToLeadIndex is monotonic over
-  // activeIndices, so only the previous entry needs checking.
-  const activeLeads: number[] = [];
-  for (const index of activeIndices) {
-    const lead = ResolveToLeadIndex(Lines, index);
-    if (IsBGLine(Lines[index]) && lead < frontLead) continue;
-    if (activeLeads[activeLeads.length - 1] !== lead) activeLeads.push(lead);
-  }
-
-  // The highest active line keeps the anchor as long as it (and its background
-  // lines) finish before the line PIN_LOOKAHEAD real lines further down starts.
-  const anchorIdx = activeLeads[0];
-  const lookahead = GetLookaheadLine(Lines, anchorIdx);
-  if (lookahead === null || GetGroupEndTime(Lines, anchorIdx) <= lookahead.StartTime) {
-    return enhance(anchorIdx);
-  }
-
-  // Anchor refused — fall back to the original heuristic: contiguous or off by
-  // only 1 → the first active line, a bigger gap → the last.
-  const firstIdx = activeLeads[0];
-  const lastIdx = activeLeads[activeLeads.length - 1];
-  return enhance(lastIdx - firstIdx <= 1 ? firstIdx : lastIdx);
+  const index = PickScrollLineIndex(Lines, ProcessedPosition);
+  if (index === null) return null;
+  return { ...Lines[index], _LineIndex: index } as EnhancedLyricsItem;
 };
 
 // Gap above the active line in "Top" scrolling. A resized popup can leave only
@@ -224,22 +427,41 @@ const GetScrollLine = (Lines: LyricsLine[] | LyricsSyllable[], ProcessedPosition
 const GetTopScrollOffset = (container: HTMLElement) =>
   IsPIP ? Math.min(50, Math.round(container.clientHeight * 0.2)) : 85;
 
+// Push on the active line in "Center" scrolling. In Fullscreen and Cinema View it
+// goes further for Bloom, and for any renderer style with Player Below the Cover
+// on (Exp_PlayerBelowCover).
+// Not while Canvas Stage shows a canvas (.CanvasImmersive): the lines keep the
+// usual offset there.
+const GetCenterScrollOffset = (container: HTMLElement) => {
+  const page = container.closest("#SpicyLyricsPage")?.classList;
+  if (!page?.contains("Fullscreen") || page.contains("CanvasImmersive")) return 30;
+  return lyricsUseRefreshedLayout() || page.contains("Exp_PlayerBelowCover") ? 80 : 30;
+};
+
 const ScrollTo = (
   container: HTMLElement,
   element: HTMLElement,
   instantScroll: boolean = false,
   type: "Center" | "Top" = "Center",
-  lineIndex?: number
+  lineIndex?: number,
+  // Glides however far the line is (the scroll-to-active button).
+  glide: boolean = false
 ) => {
   if (lineIndex !== undefined && getLyricsVirtualizer()) {
     // instantScroll is effectively always true in the virtualizer path
     // (we set scrollTop directly), but passing the flag keeps the intent
     // explicit and allows a future smooth-scroll path if needed.
-    scrollLyricsToIndex(lineIndex, type === "Top" ? "start" : "center", instantScroll, type ==="Top" ? -GetTopScrollOffset(container) : 30);
+    scrollLyricsToIndex(
+      lineIndex,
+      type === "Top" ? "start" : "center",
+      instantScroll,
+      type === "Top" ? -GetTopScrollOffset(container) : GetCenterScrollOffset(container),
+      glide
+    );
     return;
   }
   if (type === "Center") {
-    ScrollIntoCenterViewCSS(container, element, -30, instantScroll);
+    ScrollIntoCenterViewCSS(container, element, -GetCenterScrollOffset(container), instantScroll);
   } else if (type === "Top") {
     ScrollIntoTopViewCSS(container, element, GetTopScrollOffset(container), instantScroll);
   }
@@ -271,8 +493,97 @@ export const GetForceScrollingPolicy = () => {
   return allowForceScrolling;
 };
 
+// Unsynced lyrics with auto-scroll on follow the song's pace from StaticPace.ts.
+let staticPace: { key: string; pace: StaticPace | null } = { key: "", pace: null };
+let lastStaticFrame = 0;
+let lastStaticPosition = 0;
+let staticScrollY: number | null = null;
+
+function ScrollStaticLyrics(ScrollSimplebar: any) {
+  const mode = $staticAutoScroll.get();
+  const uri = SpotifyPlayer.GetUri();
+  const lineCount = LyricsObject.Types.Static.Lines.length;
+  if (mode === "off" || !uri || !lineCount) {
+    SetScrollToActiveDirection(null);
+    ReleaseStaticScroll();
+    return;
+  }
+
+  const key = `${mode}:${uri}`;
+  if (staticPace.key !== key) {
+    staticPace = { key, pace: null };
+    staticReturning = false;
+    GetStaticPace(uri, SpotifyPlayer.GetDuration(), mode).then((pace) => {
+      if (staticPace.key === key) staticPace.pace = pace;
+    });
+  }
+  const pace = staticPace.pace;
+  const container = ScrollSimplebar?.getScrollElement() as HTMLElement | undefined;
+  if (!pace || !container) {
+    SetScrollToActiveDirection(null);
+    return;
+  }
+
+  const now = performance.now();
+  const frameMs = lastStaticFrame ? Math.min(now - lastStaticFrame, 100) : 16;
+  lastStaticFrame = now;
+  const position = SpotifyPlayer.GetPosition();
+  // A seek takes the list back from a hand scroll, as it does for synced lyrics.
+  if (wasDrasticPositionChange(lastStaticPosition, position)) lastUserScrollTime = 0;
+  lastStaticPosition = position;
+  if (IsScrollbarDragging()) handleUserScroll(ScrollSimplebar);
+
+  const target = lyricsCenterScrollTopAt(pace(position) * (lineCount - 1));
+  if (target === null) return;
+  // scrollTop only holds whole device pixels, so the list's own position is kept here.
+  // Anything else moving it (a hand scroll, a relayout) takes over from where it put it.
+  if (staticScrollY === null || Math.abs(staticScrollY - container.scrollTop) > 2) {
+    staticScrollY = container.scrollTop;
+  }
+  const distance = target - staticScrollY;
+  // A hand scroll that left the point being sung half a screen or more away holds auto-scroll off.
+  const scrolledAway = lastUserScrollTime !== 0 && Math.abs(distance) > container.clientHeight / 2;
+  SetScrollToActiveDirection(scrolledAway ? (distance < 0 ? "Above" : "Below") : null);
+  // After a hand scroll, take over again once it has settled with the point being sung in view.
+  if (lastUserScrollTime) {
+    // The hand has the list: let it sit on scrollTop, with no offset of ours left over.
+    ReleaseStaticScroll();
+    if (now - lastUserScrollTime <= USER_SCROLL_COOLDOWN) return;
+    if (scrolledAway) return;
+    lastUserScrollTime = 0;
+  }
+  if (Math.abs(distance) < 0.05) {
+    staticReturning = false;
+    return;
+  }
+  // Eased toward the target each frame; more than a screen away (new lyrics, a seek) it jumps.
+  const next =
+    Math.abs(distance) > container.clientHeight && !staticReturning
+      ? target
+      : staticScrollY + distance * (1 - Math.exp(-frameMs / 200));
+  staticScrollY = setLyricsScrollPosition(next);
+  // Without the virtualizer, whole steps only. "instant" because the container's CSS
+  // smooth scrolling would queue up every step.
+  if (staticScrollY === null) container.scrollTo({ top: next, behavior: "instant" });
+}
+
+function ReleaseStaticScroll() {
+  if (staticScrollY === null) return;
+  staticScrollY = null;
+  clearLyricsScrollFraction();
+}
+
 export function ScrollToActiveLine(ScrollSimplebar: any) {
-  if ($currentLyricsType.get() === "Static" || $currentLyricsType.get() === "None") return;
+  if ($currentLyricsType.get() === "Static") {
+    StopObservingActiveLine();
+    if ($lyricsContainerExists.get()) ScrollStaticLyrics(ScrollSimplebar);
+    return;
+  }
+  if ($currentLyricsType.get() === "None") {
+    StopObservingActiveLine();
+    SetScrollToActiveDirection(null);
+    return;
+  }
   if (!$lyricsContainerExists.get()) return;
 
   const currentType = $currentLyricsType.get() as LyricsType;
@@ -289,9 +600,28 @@ export function ScrollToActiveLine(ScrollSimplebar: any) {
   // the list starts moving before the line lights up instead of snapping to it
   // the moment it does. Only the target changes — line states (Status) still
   // follow the real position.
-  const PositionOffset = $scrollLeadEnabled.get() ? Math.max(0, $scrollLeadMs.get()) : 0;
+  // Bloom times its own scroll, except while sung lines are faded away. Only in
+  // Popup Lyrics and the Now Playing card does it also start that scroll early;
+  // elsewhere Early Scroll decides, as it does for Spring.
+  const page = ScrollSimplebar?.getScrollElement()?.closest("#SpicyLyricsPage");
+  const bloomTimed = lyricsUseRefreshedLayout() && !fadesAwayPreviousLines(page);
+  let PositionOffset = $scrollLeadEnabled.get() ? Math.max(0, $scrollLeadMs.get()) : 0;
+  const bloomEarly = bloomTimed && (IsPIP || !!page?.classList.contains("CardMode"));
+  if (bloomTimed) {
+    const scroll = GetBloomScroll(Lines, Position);
+    setBloomScrollDuration(scroll.Ms);
+    if (bloomEarly) PositionOffset = scroll.LeadMs;
+  }
   const ProcessedPosition = Position + PositionOffset;
   const currentLine = GetScrollLine(Lines, ProcessedPosition) as EnhancedLyricsItem | null;
+  SetBloomFocus(bloomTimed ? (currentLine?.HTMLElement ?? null) : null);
+  // Once the scroll has moved on early, the lines above it count as sung.
+  setEarlySungBefore(bloomEarly && currentLine ? currentLine._LineIndex : -1);
+
+  // Before the returns below, which skip the rest in the intro and outro.
+  const sideTarget = currentLine ?? LineAfter(Lines, ProcessedPosition);
+  const sideContainer = ScrollSimplebar?.getScrollElement() as HTMLElement | undefined;
+  if (sideTarget && sideContainer) TrackActiveLineSide(sideContainer, sideTarget);
 
   let notSungCount = 0;
   let activeCount = 0;
@@ -450,6 +780,7 @@ export function ScrollToActiveLine(ScrollSimplebar: any) {
             QueueForceScroll();
         } */
 
+
   Continue(currentLine);
 
   function Continue(currentLine: EnhancedLyricsItem | null) {
@@ -556,7 +887,7 @@ export function ScrollToActiveLine(ScrollSimplebar: any) {
             scrolledToFirstLine = false;
           };
           // Leaving a "•••" interlude: normally wait for it to collapse first.
-          // With Smooth Scrolling (or Refreshed Simple Lyrics) the rows glide as
+          // With Smooth Scrolling (or Bloom) the rows glide as
           // it collapses, so scrolling at the same moment makes the two read as
           // one motion instead of two.
           if (
@@ -576,6 +907,7 @@ export function ScrollToActiveLine(ScrollSimplebar: any) {
         }
         // --- END REVISED LOGIC ---
       }
+
     }
   }
   //}
@@ -596,6 +928,8 @@ export function ResetLastLine() {
   lastViewportContainer = null;
   lastIsLineInViewport = false;
   lastViewportCheckTime = 0;
+  RefreshActiveLineSide();
+  SetScrollToActiveDirection(null);
   isUserScrolling = false;
   lastUserScrollTime = 0;
   lastPosition = 0;
@@ -618,6 +952,9 @@ export function CleanupScrollEvents() {
     if (touchMoveHandler) {
       scrollElement.removeEventListener("touchmove", touchMoveHandler);
     }
+    if (scrollHandler) {
+      scrollElement.removeEventListener("scroll", scrollHandler);
+    }
   }
 
   // Disconnect observer
@@ -631,10 +968,14 @@ export function CleanupScrollEvents() {
   currentSimpleBarInstance = null;
   wheelHandler = null;
   touchMoveHandler = null;
+  scrollHandler = null;
+  StopObservingActiveLine();
   forceScrollQueued = false; // Reset force scroll queue
   smoothForceScrollQueued = false;
   scrolledToLastLine = false;
   scrolledToFirstLine = false;
+  staticReturning = false;
+  SetScrollToActiveDirection(null);
   //console.log("SpicyLyrics scroll events cleaned up."); // Optional log
 }
 // --- END NEW ---

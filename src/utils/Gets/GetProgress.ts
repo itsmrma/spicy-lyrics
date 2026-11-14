@@ -1,5 +1,8 @@
-import { $playbackOffset } from "../stores.ts";
+import { lyricsOffsetMs } from "../songOffsets.ts";
 import { SpotifyPlayer } from "./../../components/Global/SpotifyPlayer.ts";
+import Logger from "../Logger.ts";
+
+const progressLogger = new Logger("Sync Position");
 
 interface SyncedPosition {
   StartedSyncAt: number;
@@ -351,7 +354,7 @@ export const requestPositionSync = () => {
       // reschedule below lives in the success path, so a single failed poll
       // would leave syncedPosition frozen with no way to recover.
       .catch((error: unknown) => {
-        console.error("Sync Position: Poll failed, More Details:", error);
+        progressLogger.error("Poll failed:", error);
       })
       .then(() => {
         const delay = isLocallyPlaying
@@ -363,7 +366,7 @@ export const requestPositionSync = () => {
         setTimeout(requestPositionSync, delay * 1000);
       });
   } catch (error) {
-    console.error("Sync Position: Fail, More Details:", error);
+    progressLogger.error("Failed:", error);
     // A synchronous throw (a Platform API not ready or renamed) must not kill
     // the loop either — retry on a slow cadence instead of hammering.
     setTimeout(requestPositionSync, 1000);
@@ -376,7 +379,9 @@ export default function GetProgress() {
   }
 
   if (!syncedPosition) {
-    console.error("Synced Position: Unavailable");
+    // Expected before the first position sync lands; falls back below. A warning, so
+    // bug reports (which keep errors) aren't filled with it.
+    progressLogger.warn("Unavailable");
     if (SpotifyPlayer?._DEPRECATED_?.GetTrackPosition) {
       // Also added this backup in case, if the "sycedPosition" is unavailable, but the "_DEPRECATED_" version is available
       console.warn("Synced Position: Skip, Using DEPRECATED Version");
@@ -391,19 +396,22 @@ export default function GetProgress() {
   // and a spurious "drastic change" force-scroll; use the player's own estimate.
   if (syncedPosition.TrackUri !== (SpotifyPlayer.GetUri() ?? null)) {
     const isPlaying = Spicetify.Player.isPlaying();
-    return normalizeProgress(Spicetify.Player.getProgress() - $playbackOffset.get(), isPlaying);
+    return normalizeProgress(
+      Spicetify.Player.getProgress() - lyricsOffsetMs(SpotifyPlayer.GetUri()),
+      isPlaying
+    );
   }
 
   const { StartedSyncAt, Position } = syncedPosition;
   const now = Date.now();
   const deltaTime = now - StartedSyncAt;
 
-  // User-configured lyric sync offset (ms). Subtracted from the clock so the
-  // sign reads the way the setting is described: negative values run the clock
-  // ahead of the audio (lyrics appear earlier), positive values hold it back
-  // (lyrics are delayed). Applied in both play/pause branches so the active
-  // line doesn't jump when playback is paused. See $playbackOffset.
-  const playbackOffset = $playbackOffset.get();
+  // User-configured lyric sync offset (ms): the Playback Offset plus this song's
+  // own. Subtracted from the clock so the sign reads the way the settings are
+  // described: negative values run the clock ahead of the audio (lyrics appear
+  // earlier), positive values hold it back (lyrics are delayed). Applied in both
+  // play/pause branches so the active line doesn't jump when playback is paused.
+  const playbackOffset = lyricsOffsetMs(syncedPosition.TrackUri);
 
   if (!Spicetify.Player.isPlaying()) {
     // Static when paused. The synced position already comes from getPositionState
@@ -419,7 +427,7 @@ export default function GetProgress() {
 export function _DEPRECATED___GetProgress() {
   // Ensure Spicetify is loaded and state is available
   if (!(Spicetify?.Player as any)?.origin?._state) {
-    console.error("Spicetify Player state is not available.");
+    progressLogger.warn("Spicetify Player state is not available.");
     return 0;
   }
 
@@ -432,7 +440,7 @@ export function _DEPRECATED___GetProgress() {
 
   // Validate data integrity
   if (positionAsOfTimestamp == null || timestamp == null) {
-    console.error("Playback state is incomplete.");
+    progressLogger.warn("Playback state is incomplete.");
     return null;
   }
 

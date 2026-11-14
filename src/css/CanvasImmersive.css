@@ -134,6 +134,11 @@
   object-position: 50% 40%;
 }
 
+/* Motion artwork is a square album cover: cropped evenly, since the art is composed around its centre. */
+#SpicyLyricsPage .ContentBox > .CanvasStage .CanvasStageFrame > .CanvasLayer[data-source="motion"] > video {
+  object-position: 50% 50%;
+}
+
 /* Dimmed so it backs the lyrics instead of competing with them; the fullscreen hover spring
    dims it further, at a gentler depth than the cover since this is a whole side of the screen.
    A black veil at 1 - b over the opaque frame is exactly brightness(b), without running a

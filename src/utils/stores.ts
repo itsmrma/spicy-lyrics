@@ -1,4 +1,4 @@
-import { atom } from "nanostores";
+import { atom, type WritableAtom } from "nanostores";
 import { ProjectVersion } from "../../project/config.ts";
 
 export const SETTINGS_KEY = "SL:settings";
@@ -51,11 +51,91 @@ function migrateSettingsKeys(blob: Record<string, any>): Record<string, any> {
     delete blob.simpleLyricsModeRenderingType;
     changed = true;
   }
+  // The old "Join Split Words" toggle joined only evenly sung words, which is "steady".
+  if ("joinSplitWords" in blob) {
+    blob.syllableMerge ??= blob.joinSplitWords ? "steady" : "off";
+    delete blob.joinSplitWords;
+    changed = true;
+  }
+  // Dual-Line Romanization became the "Under each line" display option: anyone who
+  // turned the experiment off gets the in-place romanization they had before.
+  if ("experiment:dualLineRomanization" in blob) {
+    if (blob["experiment:dualLineRomanization"] === false) {
+      blob.romanizationDisplay ??= "replace";
+    }
+    delete blob["experiment:dualLineRomanization"];
+    changed = true;
+  }
+  if (migrateRendererStyle(blob)) changed = true;
   if (changed) saveSettingsBlob(blob);
   return blob;
 }
 
+// The old Simple Lyrics Mode toggle became the Bloom style. Its refreshed look
+// was an experiment; Bloom is that look, so whoever had Simple Lyrics Mode on
+// gets Bloom whatever the experiment was set to. Exported for the migration test.
+export function migrateRendererStyle(blob: Record<string, any>): boolean {
+  let changed = false;
+  if ("simpleLyricsMode" in blob) {
+    blob.rendererVisualStyle ??= blob.simpleLyricsMode === true ? "bloom" : "spring";
+    delete blob.simpleLyricsMode;
+    changed = true;
+  }
+  if ("experiment:refreshedSimpleLyrics" in blob) {
+    delete blob["experiment:refreshedSimpleLyrics"];
+    changed = true;
+  }
+  if ("rendererVisualStyle" in blob && !RENDERER_VISUAL_STYLES.includes(blob.rendererVisualStyle)) {
+    delete blob.rendererVisualStyle;
+    changed = true;
+  }
+  return changed;
+}
+
+// How the synced lyrics move. "spring" is the original renderer; "bloom" fills
+// each line behind one soft edge, swells held words letter by letter, and
+// follows the song with a staggered scroll.
+export type RendererVisualStyle = "spring" | "bloom";
+export const RENDERER_VISUAL_STYLES: readonly RendererVisualStyle[] = ["spring", "bloom"];
+export const RENDERER_VISUAL_STYLE_LABELS: Record<RendererVisualStyle, string> = {
+  spring: "Spring (Default)",
+  bloom: "Bloom",
+};
+
 const _settings: Record<string, any> = migrateSettingsKeys(readSettingsBlob());
+
+/**
+ * Every persisted atom and its default, so the bug report can list what someone
+ * changed and TTML Reviewer mode can put values back through the atoms. Writing the
+ * blob instead wouldn't do: the atoms keep their values in memory and would save
+ * theirs over it on their next change.
+ */
+export const PersistedSettings = new Map<
+  string,
+  {
+    get: () => unknown;
+    set: (value: any) => void;
+    /** Whether the blob holds a value, as opposed to it never having been set. */
+    isStored: () => boolean;
+    /** Back to never having been set, so a later change of default still reaches it. */
+    unset: () => void;
+    defaultValue: unknown;
+  }
+>();
+
+function registerPersisted<T>(key: string, store: WritableAtom<T>, defaultValue: T) {
+  PersistedSettings.set(key, {
+    get: () => store.get(),
+    set: (value) => store.set(value),
+    isStored: () => _settings[key] !== undefined,
+    unset: () => {
+      store.set(defaultValue);
+      delete _settings[key];
+      saveSettingsBlob(_settings);
+    },
+    defaultValue,
+  });
+}
 
 /**
  * An atom backed by the settings blob. Exported so feature modules (e.g.
@@ -68,6 +148,7 @@ export function persistAtom<T>(key: string, defaultValue: T) {
     _settings[key] = v;
     saveSettingsBlob(_settings);
   });
+  registerPersisted(key, store, defaultValue);
   return store;
 }
 
@@ -92,11 +173,26 @@ export const BACKGROUND_STYLES: readonly BackgroundStyle[] = [
 ];
 export const $backgroundStyle = persistAtom<BackgroundStyle>("backgroundStyle", "dynamic");
 // Blur radius (px) for the image styles: "cover-blur", "cover", "artist-blur", "artist".
-export const $backgroundBlur = persistAtom<number>("backgroundBlur", 64);
-export const $simpleLyricsMode = persistAtom<boolean>("simpleLyricsMode", false);
+// The two "-blur" styles always keep at least a heavy blur (see spicy-dynamic-bg.css),
+// so a sharp image style is available without touching this slider.
+export const $backgroundBlur = persistAtom<number>("backgroundBlur", 0);
+// Lyrics text size as a percentage of what each view uses by default.
+export const $lyricsSize = persistAtom<number>("lyricsSize", 100);
+export const $rendererVisualStyle = persistAtom<RendererVisualStyle>("rendererVisualStyle", "spring");
+export const isBloomRenderer = (): boolean => $rendererVisualStyle.get() === "bloom";
+// Shown as "Fade Away Previous Lines"; the key keeps its old name.
 export const $minimalLyricsMode = persistAtom<boolean>("minimalLyricsMode", false);
-// Shows a word sung in syllables as one word when its parts line up evenly.
-export const $joinSplitWords = persistAtom<boolean>("joinSplitWords", false);
+// Which words sung in syllables are shown as one word: none, all, those whose
+// parts line up evenly, or those long enough to be drawn letter by letter.
+export type SyllableMerge = "off" | "full" | "steady" | "held";
+export const $syllableMerge = persistAtom<SyllableMerge>("syllableMerge", "steady");
+// A joined word drawn letter by letter times its letters by the syllables it
+// was joined from, instead of spreading them evenly over the whole word.
+export const $syllablePace = persistAtom<boolean>("syllablePace", false);
+// With romanization on, whether it replaces the line's text or shows as a
+// smaller row under each line.
+export type RomanizationDisplay = "replace" | "underLine";
+export const $romanizationDisplay = persistAtom<RomanizationDisplay>("romanizationDisplay", "underLine");
 // Tinted box drawn behind a lyrics line while the pointer is over it.
 export const $lineHoverBackground = persistAtom<boolean>("lineHoverBackground", true);
 // Wide inset on the side a duet line leans away from, so the two voices read as
@@ -105,6 +201,10 @@ export const $duetLinePadding = persistAtom<boolean>("duetLinePadding", true);
 // When a song ends on a duet line sung from the right, the credits under it
 // (writers, provider, community info) move to the right with it.
 export const $creditsFollowLastLine = persistAtom<boolean>("creditsFollowLastLine", false);
+// Credits held at the bottom of the lyrics instead of scrolling after the last line:
+// the source and community line only, or the songwriters too.
+export type PinnedCredits = "off" | "noWriters" | "full";
+export const $pinnedCredits = persistAtom<PinnedCredits>("pinnedCredits", "off");
 export const $skipSpicyFont = persistAtom<boolean>("skipSpicyFont", false);
 export const $showNpvDynamicBg = persistAtom<boolean>("showNpvDynamicBg", true);
 // Never inject the lyrics card into the Now Playing sidebar at all.
@@ -131,6 +231,7 @@ export const $popupLyricsAllowed = (() => {
     _settings["popupLyricsAllowed"] = v;
     saveSettingsBlob(_settings);
   });
+  registerPersisted("popupLyricsAllowed", store, true);
   return store;
 })();
 export const $viewControlsPosition = persistAtom<string>("viewControlsPosition", "Top");
@@ -142,8 +243,21 @@ export const $timelineOutsideMediaContent = persistAtom<boolean>(
   "timelineOutsideMediaContent",
   true
 );
+// The album's animated cover, played over the still one when it has one.
+export const $motionArtwork = persistAtom<boolean>("motionArtwork", true);
+// With Canvas Stage on, what plays when a song has both a Canvas and motion artwork.
+export type MotionArtworkPriority = "motion" | "canvas";
+export const $motionArtworkPriority = persistAtom<MotionArtworkPriority>("motionArtworkPriority", "motion");
+// Motion artwork may fill the Canvas Stage (while Canvas Stage is on); off keeps it on the NowBar cover.
+export const $motionArtworkOnStage = persistAtom<boolean>("motionArtworkOnStage", true);
 // Volume band below the playback controls in Fullscreen / Cinema View / Popup Lyrics.
 export const $showVolumeSlider = persistAtom<boolean>("showVolumeSlider", true);
+// Unsynced lyrics scroll through at the song's pace: "basic" follows loudness, "advanced" the voice.
+export type StaticAutoScroll = "off" | "basic" | "advanced";
+export const $staticAutoScroll = persistAtom<StaticAutoScroll>("staticAutoScroll", "off");
+// Where the song's release year sits in the NowBar's artists row.
+export type ReleaseYearPosition = "off" | "left" | "right";
+export const $releaseYearPosition = persistAtom<ReleaseYearPosition>("releaseYearPosition", "off");
 // Playback timing offset in milliseconds (bipolar: negative = earlier, positive = later)
 export const $playbackOffset = persistAtom<number>("playbackOffset", 0);
 // Clicking a line seeks this much earlier, so Spotify's ~300ms fade-in on seek
@@ -154,6 +268,8 @@ export const $scrollLeadEnabled = persistAtom<boolean>("scrollLeadEnabled", fals
 export const $scrollLeadMs = persistAtom<number>("scrollLeadMs", 250);
 // Spring-driven auto-scroll instead of the browser's native smooth scroll.
 export const $smoothScrolling = persistAtom<boolean>("smoothScrolling", false);
+// A button back to the line being sung while a hand scroll has left it out of view.
+export const $showScrollToActive = persistAtom<boolean>("showScrollToActive", true);
 // Frame rate cap for everything that redraws every frame (lyrics animation,
 // animated background, smooth-scroll glide). On high refresh rate displays every
 // extra frame is another repaint of the whole page, so this bounds the per-second

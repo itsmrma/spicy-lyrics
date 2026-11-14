@@ -17,13 +17,17 @@ import {
 } from "../lyrics.ts";
 import { CreateLyricsContainer, DestroyAllLyricsContainers } from "./CreateLyricsContainer.ts";
 import { StripZeroWidth } from "./Utils/StripZeroWidth.ts";
-import { HasOriginalScriptDiff, PickDisplayText } from "./Utils/PickDisplayText.ts";
+import { PickDisplayText } from "./Utils/PickDisplayText.ts";
+import { AppendLineRomanization, RomanizeUnderLine } from "./Utils/RomanizedRow.ts";
 import { initLyricsVirtualizer } from "../LyricsVirtualizer.ts";
 import { ApplySongCredits, MarkLastLineSide } from "./Credits/ApplyLyricsCredits.ts";
 import { EmitApply, EmitNotApplyed } from "./OnApply.ts";
 import { RemoveEmptyLyricsLines } from "../EmptyLines.ts";
 import { isExperimentEnabled } from "../../experiments.ts";
 import { createSingerBadgeContainer } from "../Genius/GeniusSingerAttribution.ts";
+import Logger from "../../Logger.ts";
+
+const staticLogger = new Logger("Static Lyrics");
 
 /**
  * Interface for static lyrics data
@@ -47,6 +51,9 @@ export interface StaticLyricsData {
  */
 export function ApplyStaticLyrics(data: StaticLyricsData, UseRomanized: boolean = false): void {
   if (!$lyricsContainerExists.get()) return;
+  // Under each line, the line keeps its own text and the romanization gets a row below it.
+  const UnderLine = RomanizeUnderLine();
+  const ShowRomanized = UseRomanized && !UnderLine;
 
   EmitNotApplyed();
 
@@ -59,7 +66,7 @@ export function ApplyStaticLyrics(data: StaticLyricsData, UseRomanized: boolean 
   const LyricsContainer = LyricsContainerInstance.Container;
 
   if (!LyricsContainer) {
-    console.error("Cannot apply static lyrics: LyricsContainer not found");
+    staticLogger.error("Cannot apply static lyrics: LyricsContainer not found");
     return;
   }
 
@@ -85,37 +92,16 @@ export function ApplyStaticLyrics(data: StaticLyricsData, UseRomanized: boolean 
   lines.forEach((line) => {
     const lineElem = document.createElement("div");
 
-    const showDual =
-      isExperimentEnabled("dualLineRomanization") &&
-      UseRomanized &&
-      HasOriginalScriptDiff(line);
-
-    const showSinger =
-      isExperimentEnabled("geniusSingerAttribution") && !!line.Singer;
-
-    if (showSinger && line.Singer) {
+    if (isExperimentEnabled("geniusSingerAttribution") && line.Singer) {
       const singerContainer = createSingerBadgeContainer(line.Singer);
       if (singerContainer) {
         lineElem.appendChild(singerContainer);
       }
     }
 
-    if (showDual && line.Text) {
-      const headerElem = document.createElement("div");
-      headerElem.classList.add("LineHeader");
-      const origElem = document.createElement("span");
-      origElem.classList.add("OriginalScript");
-      origElem.textContent = StripZeroWidth(line.Text);
-      headerElem.appendChild(origElem);
-      lineElem.appendChild(headerElem);
-      lineElem.classList.add("DualLine");
-    }
-
     const mainTextElem = document.createElement("span");
     mainTextElem.classList.add("MainText");
-    mainTextElem.textContent = StripZeroWidth(
-      PickDisplayText(line, UseRomanized)
-    );
+    mainTextElem.textContent = StripZeroWidth(PickDisplayText(line, ShowRomanized));
     lineElem.appendChild(mainTextElem);
 
     if (isRtl(line.Text) && !lineElem.classList.contains("rtl")) {
@@ -124,6 +110,7 @@ export function ApplyStaticLyrics(data: StaticLyricsData, UseRomanized: boolean 
 
     lineElem.classList.add("line");
     lineElem.classList.add("static");
+    if (UnderLine) AppendLineRomanization(lineElem, line);
 
     // Add the line element to the lyrics object
     const staticLine: LyricsStatic = {

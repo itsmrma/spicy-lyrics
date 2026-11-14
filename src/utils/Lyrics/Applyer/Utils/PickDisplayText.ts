@@ -1,29 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 
 import { HasLyricsText } from "../../EmptyLines.ts";
-import { StripZeroWidth } from "./StripZeroWidth.ts";
-
-// Matches any Unicode letter that is NOT in the Latin script (e.g. Hangul,
-// Hiragana, Katakana, Han/Kanji, Cyrillic, Greek, Arabic, Hebrew, Thai, etc.).
-// Purely English/Latin lines contain no such characters and should never show
-// a duplicate `.OriginalScript` header above the line.
-const NonLatinLetterRe = /[^\P{L}\p{Script=Latin}]/u;
-
-export function HasOriginalScriptDiff(
-  entry:
-    | {
-        Text?: string;
-        TransliteratedText?: string;
-      }
-    | null
-    | undefined
-): boolean {
-  if (!entry?.Text || !entry?.TransliteratedText) return false;
-  const orig = StripZeroWidth(entry.Text).trim();
-  const rom = StripZeroWidth(entry.TransliteratedText).trim();
-  if (!orig || !rom || orig === rom) return false;
-  return NonLatinLetterRe.test(orig);
-}
 
 // Which of an entry's two texts to render.
 //
@@ -39,6 +16,17 @@ export function PickDisplayText(entry: any, useRomanized: boolean): string {
   if (useRomanized && romanized !== undefined) return romanized;
   if (HasLyricsText(original)) return original;
   return HasLyricsText(romanized) ? romanized : (original ?? "");
+}
+
+// Whether the next syllable continues this one's word, judged on the text that
+// renders. IsPartOfWord describes the original script, where Japanese or
+// Chinese has no gaps at all, so a syllable shown from its romanization reads
+// TransliteratedIsPartOfWord instead and falls back when it isn't there.
+export function PickPartOfWord(entry: any, useRomanized: boolean): boolean {
+  if (useRomanized && entry?.TransliteratedText !== undefined) {
+    return !!(entry.TransliteratedIsPartOfWord ?? entry.IsPartOfWord);
+  }
+  return !!entry?.IsPartOfWord;
 }
 
 export default PickDisplayText;

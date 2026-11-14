@@ -181,22 +181,24 @@ aside:has(.spicy-dynamic-bg) .iHa_q9pq4un3VNRQgwTx {
   scale: 1 !important;
 }
 
+/* The -blur styles keep a heavy blur of their own, so they stay blurred even when
+   the blur slider is at 0 (where the sharp "Cover Art"/"Artist Image" sit). */
 #SpicyLyricsPage .spicy-dynamic-bg.StaticBackground.BlurredBackground::before {
   content: "";
   position: absolute;
-  inset: -60px;
+  inset: -96px;
   background: var(--BackgroundImage) center / cover no-repeat;
   filter: brightness(0.55) contrast(1.05) saturate(1.7)
-    blur(var(--BackgroundImageBlur, 64px));
+    blur(max(48px, var(--BackgroundImageBlur, 0px)));
   will-change: filter;
   transform: translate3d(0, 0, 0);
 }
 
 #SpicyLyricsPage.Exp_RefinedBackground .spicy-dynamic-bg.StaticBackground.BlurredBackground::before {
-  inset: calc(var(--BackgroundImageBlur, 64px) * -1.5);
+  inset: calc(max(48px, var(--BackgroundImageBlur, 0px)) * -1.5);
   background: var(--BackgroundImage) center / cover no-repeat;
   filter: brightness(0.55) contrast(1.05) saturate(1.7)
-    blur(var(--BackgroundImageBlur, 64px));
+    blur(max(48px, var(--BackgroundImageBlur, 0px)));
 }
 
 /* Refined layer changes: a new layer fades in over the old one, which holds still

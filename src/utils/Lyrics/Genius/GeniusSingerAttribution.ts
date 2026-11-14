@@ -1387,10 +1387,10 @@ async function romanizeSingleCjkToken(token: string): Promise<string> {
     } catch {}
   }
 
-  // Japanese (Hiragana / Katakana / Kanji via Kuroshiro + Kuromoji)
+  // Japanese (Hiragana / Katakana / Kanji via Kuromoji)
   try {
-    const { RomanizeJapaneseSyllables } = await import("../JapaneseRomanizer.ts");
-    const res = await RomanizeJapaneseSyllables([cleaned]);
+    const { RomanizeJapaneseLine } = await import("../RomanizeJapaneseLine.ts");
+    const res = await RomanizeJapaneseLine([{ Text: cleaned, IsPartOfWord: false }]);
     const rom = res?.[0]?.text?.trim();
     if (rom && !hasCjkScript(rom)) {
       return toTitleCaseWords(rom);
