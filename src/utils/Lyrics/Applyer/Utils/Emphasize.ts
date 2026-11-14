@@ -181,6 +181,7 @@ export default function Emphasize(
       TotalTime: totalDuration,
       LetterGroup: true,
       Letters,
+      ...(parts ? { Paced: true } : {}),
       ...(flameGroup ? { FlameGroup: flameGroup, FlameOffset } : {}),
       ...mcont,
     });

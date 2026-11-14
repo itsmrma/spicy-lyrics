@@ -97,7 +97,8 @@ export default function UploadTTMLModal({ onBack, onDone }: UploadTTMLModalProps
               setUploading(false);
               return;
             }
-            const dataToSave = { ...result, uri, temporaryUpload: true };
+            // The source rides along so a spelling change can romanize it again (fetchLyrics).
+            const dataToSave = { ...result, uri, temporaryUpload: true, uploadedTTML: ttml };
             await ProcessLyrics(dataToSave);
             $currentLyricsData.set(JSON.stringify(dataToSave));
             setTimeout(() => {

@@ -64,6 +64,8 @@ export interface SyllableLead {
   }>;
   BGWord?: boolean;
   Dot?: boolean;
+  // Keep Syllable Pace: the letters are timed by the joined word's own syllables.
+  Paced?: boolean;
   AnimatorStore?: SyllableAnimatorStore;
   // Bloom: letters in the whole word this syllable belongs to.
   WordLetters?: number;

@@ -165,9 +165,18 @@ function onMotionFailed(upc: string) {
 
 // Plays motion artwork in a stage layer. A cached URL may have outlived its 5-minute signature,
 // and so may a range fetched mid-loop: either is signed again and picks up from the same frame.
-async function attachMotion(video: HTMLVideoElement, upc: string): Promise<(() => void) | null> {
+// A pending layer keeps its element, so a newer Refresh may attach to the same video while this
+// one waits on the signer: a superseded attach leaves the element alone, and detach only clears a
+// source this attach set.
+async function attachMotion(video: HTMLVideoElement, upc: string, gen: number): Promise<(() => void) | null> {
   let source = await GetArtworkUrl(upc);
+  if (gen !== generation) return () => {};
   if (!source) return null;
+  let ownSrc = "";
+  const setSource = (url: string) => {
+    video.src = url;
+    ownSrc = video.src;
+  };
   const cleanup = new AbortController();
   const { signal } = cleanup;
   let played = false;
@@ -183,15 +192,16 @@ async function attachMotion(video: HTMLVideoElement, upc: string): Promise<(() =
       source = await GetArtworkUrl(upc, true);
       if (signal.aborted) return;
       if (!source) return onMotionFailed(upc);
-      video.src = source.url;
+      setSource(source.url);
       video.currentTime = at;
       syncPlayback();
     },
     { signal },
   );
-  video.src = source.url;
+  setSource(source.url);
   return () => {
     cleanup.abort();
+    if (video.src !== ownSrc) return;
     video.removeAttribute("src");
     video.load();
   };
@@ -690,6 +700,8 @@ async function Refresh(isRetry = false) {
     try {
       detach = await AttachCanvasMedia(next.video, media);
     } catch (err) {
+      // A newer load may have taken the element over; that isn't this canvas failing.
+      if (gen !== generation || mount !== m) return;
       immersiveLogger.warn("Canvas playback failed", media.fileId, err);
       failedFileId = media.fileId;
       if (gen === generation) deactivate();
@@ -702,7 +714,7 @@ async function Refresh(isRetry = false) {
     }
   } else {
     releaseLayer(next);
-    detach = await attachMotion(next.video, source.upc);
+    detach = await attachMotion(next.video, source.upc, gen);
     if (!detach) {
       // The signer is unreachable; the cover gets its chance instead.
       if (gen === generation && mount === m) onMotionFailed(source.upc);

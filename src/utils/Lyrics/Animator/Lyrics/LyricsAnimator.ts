@@ -614,6 +614,26 @@ function dropLineSweep(lineEl: HTMLElement): void {
   _sweepResize?.unobserve(lineEl);
 }
 
+// With Keep Syllable Pace, how far across a joined word the light is, from 0 to 1. Each letter
+// fills over its own time, so a long syllable takes longer to cross than a quick one.
+function getPacedShare(word: SyllableLead, span: SweepSpan, position: number): number | null {
+  const letters = word.Letters;
+  const { LetterX: lx, LetterW: lw } = span;
+  if (!letters?.length || !lx || !lw || letters.length !== lx.length) return null;
+  const width = lx[lx.length - 1] + lw[lw.length - 1];
+  if (width <= 0) return null;
+  let x = 0;
+  for (let j = 0; j < letters.length; j++) {
+    const letter = letters[j];
+    if (position < letter.StartTime) break;
+    const length = letter.EndTime - letter.StartTime;
+    const filled = length > 0 ? Math.min(1, (position - letter.StartTime) / length) : 1;
+    x = lx[j] + lw[j] * filled;
+    if (filled < 1) break;
+  }
+  return Math.min(1, x / width);
+}
+
 function updateLineSweep(sweep: LineSweep, words: SyllableLead[], position: number): void {
   const { Spans: spans, Edges: edges } = sweep;
   const half = sweep.Fade / 2;
@@ -639,7 +659,9 @@ function updateLineSweep(sweep: LineSweep, words: SyllableLead[], position: numb
         at = to + (lit - to) * Math.min(1, (position - word.EndTime) / RefreshedSweep.RushMs);
       }
     } else if (position > word.StartTime) {
-      at = from + ((to - from) * (position - word.StartTime)) / (word.EndTime - word.StartTime);
+      const paced = word.Paced ? getPacedShare(word, span, position) : null;
+      const share = paced ?? (position - word.StartTime) / (word.EndTime - word.StartTime);
+      at = from + (to - from) * share;
     }
     edges[i] = at;
     if (at > reached) reached = at;

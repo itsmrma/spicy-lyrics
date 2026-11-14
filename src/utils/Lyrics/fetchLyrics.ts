@@ -9,6 +9,7 @@ import { JapaneseRomajiIsCurrent, ProcessLyrics } from "./ProcessLyrics.ts";
 import { IsEmptyLyrics } from "./EmptyLines.ts";
 import Logger from "../Logger.ts";
 import { LocalLyricsManager } from "./manager/index.ts";
+import { ParseTTML } from "./manager/parseTTML.ts";
 import { LyricsQueueRetry } from "./LyricsQueueRetry.ts";
 import { SetShownNotice, SyncNoLyricsLayout } from "./LyricsNotice.ts";
 import { GetExpireStore } from "../../modules/Store.ts";
@@ -292,9 +293,25 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
           return ["lyrics-not-found", 404];
         }
       } else {
-        const lyricsData = JSON.parse(savedLyricsData);
+        let lyricsData = JSON.parse(savedLyricsData);
         // Return the stored lyrics if the URI matches the current track URI
         if (lyricsData?.uri === uri) {
+          // A "Just once" upload made with the other Japanese spelling is romanized again
+          // from its own TTML, since its processed syllables keep the old romaji.
+          if (
+            lyricsData.temporaryUpload === true &&
+            typeof lyricsData.uploadedTTML === "string" &&
+            !JapaneseRomajiIsCurrent(lyricsData)
+          ) {
+            const reparsed = ParseTTML(lyricsData.uploadedTTML);
+            if (reparsed) {
+              const refreshed = { ...reparsed, uri, temporaryUpload: true, uploadedTTML: lyricsData.uploadedTTML };
+              await ProcessLyrics(refreshed);
+              if (isStaleFetch(uri)) return [refreshed, 200];
+              lyricsData = refreshed;
+              $currentLyricsData.set(JSON.stringify(lyricsData));
+            }
+          }
           // Shown again: keep where they first came from, when that's known.
           if (lastAnswer?.uri !== uri) lastAnswer = { uri, from: "already loaded" };
           presentLyrics(lyricsData);

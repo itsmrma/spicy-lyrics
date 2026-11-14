@@ -100,6 +100,8 @@ let refreshHeld = false;
  * and an edit sent with the old one does nothing, so these rows take no edits until the list is in.
  */
 let awaitingQueue = new WeakSet<HTMLElement>();
+/** The ids those rows were moved under: a move placed beside one would send a stale anchor. */
+let awaitingUids = new Set<string>();
 /** The next render puts rows in place without sliding them: a move made from the keyboard. */
 let snapNextRender = false;
 let announceRow: HTMLElement | null = null;
@@ -394,6 +396,7 @@ async function Load() {
     // Spotify's own list is in: moved rows carry their current ids again, and a move made from
     // the keyboard is read out where it actually landed.
     awaitingQueue = new WeakSet();
+    awaitingUids = new Set();
     const moved = announceRow;
     announceRow = null;
     if (moved?.isConnected) AnnounceMove(moved);
@@ -1074,21 +1077,23 @@ function StateFromMove(state: QueueState, track: QueueTrack, target: MoveTarget)
 
 /**
  * Shows a move at once and sends it to Spotify. `snap` puts the rows straight in place: a key held
- * for a few moves would otherwise wait on each slide.
+ * for a few moves would otherwise wait on each slide. False when the move wasn't made.
  */
-function CommitMove(row: HTMLElement, target: MoveTarget, snap = false) {
+function CommitMove(row: HTMLElement, target: MoveTarget, snap = false): boolean {
   const track = rowTracks.get(row);
   const api = playerApi();
-  if (!track || !lastState || typeof api?.reorderQueue !== "function" || awaitingQueue.has(row)) return;
+  if (!track || !lastState || typeof api?.reorderQueue !== "function" || awaitingQueue.has(row)) return false;
   const anchor = "before" in target ? target.before : target.after;
-  if (anchor.uid === track.uid) return;
+  if (anchor.uid === track.uid || awaitingUids.has(anchor.uid)) return false;
   lastEditAt = performance.now();
   snapNextRender = snap;
   Render(StateFromMove(lastState, track, target));
   awaitingQueue.add(row);
+  awaitingUids.add(track.uid);
   const ref = (t: QueueTrack) => ({ uri: t.uri, uid: t.uid });
   const position = "before" in target ? { before: ref(target.before) } : { after: ref(target.after) };
   QueueEdit("move the song", () => api.reorderQueue([ref(track)], position));
+  return true;
 }
 
 /** The rows and labels in list order, without the ones fading out or the count at the end. */
@@ -1127,8 +1132,7 @@ function MoveByKey(row: HTMLElement, step: -1 | 1) {
     }
   }
   if (!target || awaitingQueue.has(row)) return;
-  CommitMove(row, target, true);
-  announceRow = row;
+  if (CommitMove(row, target, true)) announceRow = row;
 }
 
 function AnnounceMove(row: HTMLElement) {
@@ -1368,11 +1372,14 @@ function PrevItem(el: Element): Element | null {
 
 /** Where the row now sits in the list, as a move: after the row above it, or before the one below. */
 function DropTarget(row: HTMLElement): MoveTarget | null {
-  const prev = PrevItem(row);
-  const above = prev?.classList.contains("QueueRow") ? rowTracks.get(prev as HTMLElement) : undefined;
+  // A row moved since the list was read still carries its old id, so the other neighbour anchors.
+  const anchorOf = (el: Element | null | undefined) => {
+    const track = el?.classList.contains("QueueRow") ? rowTracks.get(el as HTMLElement) : undefined;
+    return track && !awaitingUids.has(track.uid) ? track : undefined;
+  };
+  const above = anchorOf(PrevItem(row));
   if (above) return { after: above };
-  const next = NextItem(row);
-  const below = next?.classList.contains("QueueRow") ? rowTracks.get(next as HTMLElement) : undefined;
+  const below = anchorOf(NextItem(row));
   return below ? { before: below } : null;
 }
 
@@ -1435,12 +1442,12 @@ function EndDrag(how: "drop" | "cancel", animate = true) {
   panel?.classList.remove("Dragging");
 
   const moved = PrevItem(row) !== current.homePrev || NextItem(row) !== current.homeNext;
-  if (how === "cancel" && moved && list && row.isConnected) {
+  const target = how === "drop" && moved && row.isConnected ? DropTarget(row) : null;
+  // A cancelled drag, or a drop that couldn't be sent, goes back where it was.
+  if (moved && !(target && CommitMove(row, target)) && list && row.isConnected) {
     if (current.homeNext?.parentElement === list) list.insertBefore(row, current.homeNext);
     else if (current.homePrev?.parentElement === list) current.homePrev.after(row);
   }
-  const target = how === "drop" && moved && row.isConnected ? DropTarget(row) : null;
-  if (target) CommitMove(row, target);
   // The press focused the row's button; a key pressed after (Escape) would ring it as if tabbed to.
   if (row.ownerDocument.activeElement === current.handle) current.handle.blur();
   Settle(row, current.float, animate);
