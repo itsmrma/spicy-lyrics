@@ -22,6 +22,7 @@ import ApplyDynamicBackground, {
 } from "./components/DynamicBG/dynamicBackground.ts";
 import { isExperimentEnabled } from "./utils/experiments.ts";
 import "./components/DynamicBG/CanvasImmersive.ts";
+import "./components/DynamicBG/AnimatedArtwork.ts";
 import "./components/DynamicBG/NpvCanvasBackground.ts";
 import {
   $currentLyricsData,
@@ -60,6 +61,8 @@ import "./css/polyfills/sonner-polyfill.css";
 import "./css/NPVLyrics.css";
 import "./css/PopupDock.css";
 import "./css/PortraitFullscreen.css";
+import "./css/PlayerBelowCover.css";
+import "./css/GroupedViewControls.css";
 import { showUpdatedDialog } from "./components/ReactComponents/UpdateDialog.tsx";
 import { IsPIP, OpenPopupLyrics, ClosePopupLyrics } from "./components/Utils/PopupLyrics.ts";
 import { GetNPVCardElement, GetNPVElement, GetNPVObserverRoot, initNPVLyrics } from "./components/Utils/NPVLyrics.ts";
@@ -142,112 +145,6 @@ async function main() {
             to {
                 background-position-x: 0;
             }
-        }
-
-        @keyframes Marquee_SongName {
-          0% {
-            transform: translateX(calc(0px + min(-100% + 86cqw, 0px) * 0));
-          }
-          10% {
-            transform: translateX(calc(0px + min(-100% + 86cqw, 0px) * 0));
-          }
-          90% {
-            transform: translateX(calc(0px + min(-100% + 86cqw, 0px) * 1));
-          }
-          100% {
-            transform: translateX(calc(0px + min(-100% + 86cqw, 0px) * 1));
-          }
-        }
-
-        @keyframes Marquee_SongName_SongMoreInfo {
-          0% {
-            transform: translateX(calc(0px + min(-100% + 98cqw, 0px) * 0));
-          }
-          10% {
-            transform: translateX(calc(0px + min(-100% + 98cqw, 0px) * 0));
-          }
-          90% {
-            transform: translateX(calc(0px + min(-100% + 98cqw, 0px) * 1));
-          }
-          100% {
-            transform: translateX(calc(0px + min(-100% + 98cqw, 0px) * 1));
-          }
-        }
-
-        @keyframes Marquee_Artists {
-          0% {
-            transform: translateX(calc(0px + min(-100% + 81cqw, 0px) * 0));
-          }
-          10% {
-            transform: translateX(calc(0px + min(-100% + 81cqw, 0px) * 0));
-          }
-          90% {
-            transform: translateX(calc(0px + min(-100% + 81cqw, 0px) * 1));
-          }
-          100% {
-            transform: translateX(calc(0px + min(-100% + 81cqw, 0px) * 1));
-          }
-        }
-
-        @keyframes Marquee_Artists_SongMoreInfo {
-          0% {
-            transform: translateX(calc(0px + min(-100% + 98cqw, 0px) * 0));
-          }
-          10% {
-            transform: translateX(calc(0px + min(-100% + 98cqw, 0px) * 0));
-          }
-          90% {
-            transform: translateX(calc(0px + min(-100% + 98cqw, 0px) * 1));
-          }
-          100% {
-            transform: translateX(calc(0px + min(-100% + 98cqw, 0px) * 1));
-          }
-        }
-
-        /* Canvas Stage: title and artists share the same 92cqw box (CanvasImmersive.css). */
-        @keyframes Marquee_Canvas {
-          0% {
-            transform: translateX(calc(0px + min(-100% + 93cqw, 0px) * 0));
-          }
-          10% {
-            transform: translateX(calc(0px + min(-100% + 93cqw, 0px) * 0));
-          }
-          90% {
-            transform: translateX(calc(0px + min(-100% + 93cqw, 0px) * 1));
-          }
-          100% {
-            transform: translateX(calc(0px + min(-100% + 93cqw, 0px) * 1));
-          }
-        }
-
-        @keyframes Marquee_SongName_Compact {
-          0% {
-            transform: translateX(calc(0px + min(-100% + 100cqw, 0px) * 0));
-          }
-          10% {
-            transform: translateX(calc(0px + min(-100% + 100cqw, 0px) * 0));
-          }
-          90% {
-            transform: translateX(calc(0px + min(-100% + 100cqw, 0px) * 1));
-          }
-          100% {
-            transform: translateX(calc(0px + min(-100% + 100cqw, 0px) * 1));
-          }
-        }
-
-        @keyframes Marquee_Artists_Compact {
-          0% {
-            transform: translateX(calc(0px + min(-100% + 100cqw, 0px) * 0));
-          }
-          10% {
-            transform: translateX(calc(0px + min(-100% + 100cqw, 0px) * 0));
-          }
-          90% {
-            transform: translateX(calc(0px + min(-100% + 100cqw, 0px) * 1));
-          }
-          100% {
-            transform: translateX(calc(0px + min(-100% + 100cqw, 0px) * 1));
-          }
         }
 
         @keyframes SL_SkeletonSweep {
@@ -837,8 +734,11 @@ async function main() {
     });
 
     let songChangeSeen = false;
+    // The cover the last background apply was asked for (see the cover poll below).
+    let lastBackgroundCover = "";
     async function onSongChange(event: any) {
       songChangeSeen = true;
+      lastBackgroundCover = SpotifyPlayer.GetCover("large") ?? "";
       playbackLogger.debug("Song change pipeline");
       const contentType = SpotifyPlayer.GetContentType();
       playbackLogger.debug("Detected content type", contentType);
@@ -883,6 +783,24 @@ async function main() {
       }
     }
     Global.Event.listen("playback:songchange", onSongChange);
+
+    // At a song change the player can still report a cover that isn't the new track's,
+    // and nothing fires when the right one arrives, so the background stayed on the
+    // wrong art. Repaint whenever the reported cover differs from the one last applied;
+    // an apply for the cover already shown returns at once.
+    {
+      lastBackgroundCover = SpotifyPlayer.GetCover("large") ?? "";
+      new IntervalManager(0.5, () => {
+        const cover = SpotifyPlayer.GetCover("large") ?? "";
+        if (cover === lastBackgroundCover) return;
+        lastBackgroundCover = cover;
+        void scheduleNowPlayingBarDynamicBackgroundApply();
+        const contentBox = PageContainer?.querySelector<HTMLElement>(".ContentBox");
+        if (!contentBox) return;
+        if (getBackgroundStyle() === "color" && !isExperimentEnabled("refinedBackground")) return;
+        void ApplyDynamicBackground(contentBox, PAGE_BACKGROUND_KEY);
+      }).Start();
+    }
 
     // Spotify can restore the track before the songchange relay is attached and never send one for
     // it, which leaves a page opened at boot on the placeholder cover with no lyrics.

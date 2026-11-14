@@ -1,4 +1,5 @@
 import { useStore } from "@nanostores/react";
+import { Fragment } from "react";
 import { getExperiment, getVisibleExperiments } from "../../../utils/experiments.ts";
 import {
   $ttmlReviewer,
@@ -52,17 +53,30 @@ export function ReviewerPane({ labelOf }: { labelOf: (id: string) => string | un
         <h3 className="sl-sp-group-title">What it sets</h3>
         <div className="sl-sp-reviewer-list">
           {REVIEWER_SETTINGS.map(({ key, shown }) => (
-            <div key={key} className="sl-sp-reviewer-item">
-              <span>{labelOf(key) ?? key}</span>
-              <span className="sl-sp-reviewer-value">{shown}</span>
-            </div>
+            <Fragment key={key}>
+              <div className="sl-sp-reviewer-item">
+                <span>{labelOf(key) ?? key}</span>
+                <span className="sl-sp-reviewer-value">{shown}</span>
+              </div>
+              {/* Kept apart from the settings, so the mode skips them rather than resetting them. */}
+              {key === "playbackOffset" && (
+                <div className="sl-sp-reviewer-item">
+                  <span>Per-song Offsets</span>
+                  <span className="sl-sp-reviewer-value">Ignored</span>
+                </div>
+              )}
+            </Fragment>
           ))}
-          {REVIEWER_EXPERIMENTS_OFF.map((id) => (
-            <div key={id} className="sl-sp-reviewer-item">
-              <span>{getExperiment(id).label}</span>
-              <span className="sl-sp-reviewer-value">Off</span>
-            </div>
-          ))}
+          {/* A remote forceState still wins over the mode, and a hidden experiment isn't named here
+              any more than in the Experiments tab. */}
+          {REVIEWER_EXPERIMENTS_OFF.map((id) => getExperiment(id))
+            .filter((experiment) => !experiment.hidden)
+            .map((experiment) => (
+              <div key={experiment.id} className="sl-sp-reviewer-item">
+                <span>{experiment.label}</span>
+                <span className="sl-sp-reviewer-value">{experiment.forceState === true ? "Forced on" : "Off"}</span>
+              </div>
+            ))}
           {defaulted.length > 0 && (
             <div className="sl-sp-reviewer-item">
               <span>Other experiments</span>

@@ -5,37 +5,46 @@ import { PageContainer } from "../Pages/PageView.ts";
 import Fullscreen from "./Fullscreen.ts";
 import { IsPIP } from "./PopupLyrics.ts";
 import { isExperimentEnabled, onExperimentChange } from "../../utils/experiments.ts";
+import { CreateTextScroller, type TextScroller } from "../../utils/TextScroller.ts";
+import { ClaimSwitchClearance } from "../../utils/ViewSwitchClearance.ts";
 
 /**
- * "Next up" in fullscreen and Cinema View: for the last stretch of a song, the next
- * track in the queue (cover, title, artist) in the corner above the lyrics. Display
- * only, so clicks pass through to the lyrics. Gated by the `nextUpCard` experiment.
+ * Up Next in fullscreen and Cinema View: for the last stretch of a song, the next track in the
+ * queue sits at the bottom of the lyrics column, where the lines start, on the Lyrics / Queue
+ * switch's row. When the switch shares its side it slides past the capsule while the switch is
+ * awake, and back when it sleeps. It reads like the queue's first row and is display only. The lyrics fade out above it while it shows (the mask lift in main.css).
+ * Gated by the `nextUpCard` experiment.
  */
 
 // Shown once this little of the song is left.
 const SHOW_WITHIN_MS = 30_000;
-// How often the remaining time and the queue are re-read while fullscreen is open.
+// How often the remaining time and the queue are read while the view is open.
 const TICK_MS = 500;
-// Text too long for the card scrolls past as a loop at about this speed, after a short pause.
-const SCROLL_PX_PER_S = 40;
-const SCROLL_PAUSE_MS = 700;
-// It speeds up from rest over this long, then keeps going at a steady pace.
-const SCROLL_RAMP_MS = 800;
-const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+// The longest exit in NextUp.css. Content is swapped only once it has finished.
+const EXIT_MS = 220;
+// The body crossfade when the next track changes while it shows.
+const SWAP_MS = 180;
+// Space between the lyrics' fade and the top of the element.
+const LYRICS_CLEARANCE_PX = 24;
 
 type NextTrack = { uri: string; title: string; artist: string; image: string | null };
+type Body = { el: HTMLElement; scroller: TextScroller | null };
 
-let card: HTMLElement | null = null;
-let content: HTMLElement | null = null;
+let root: HTMLElement | null = null;
+let body: Body | null = null;
 let shownUri: string | null = null;
 let ticker: ReturnType<typeof setInterval> | null = null;
-// Watches the controls' fade in Canvas Stage, where the card makes way for them.
-let controlsObserver: MutationObserver | null = null;
-let observedMediaBox: HTMLElement | null = null;
-// When the card was last hidden. Its content is only replaced once the fade-out is over.
 let hiddenAt = 0;
-// A little longer than the fade-out in NextUp.css.
-const FADE_OUT_MS = 450;
+// The top edge the lyrics last made room for, so a move (pinned credits, a resize) lifts them again.
+let liftedTop: number | null = null;
+// A track forced in from the console (SpicyLyrics.testing.nextUp), shown regardless of time left.
+let forced: NextTrack | null = null;
+
+function imageUrl(uri: string | undefined): string | null {
+  if (!uri) return null;
+  if (uri.startsWith("spotify:image:")) return `https://i.scdn.co/image/${uri.slice("spotify:image:".length)}`;
+  return uri.startsWith("https://") ? uri : null;
+}
 
 /** The first real track or episode coming up, skipping separators and ads. */
 function readNextTrack(): NextTrack | null {
@@ -49,55 +58,14 @@ function readNextTrack(): NextTrack | null {
       .filter((key) => /^artist_name(:\d+)?$/.test(key))
       .sort((a, b) => Number(a.split(":")[1] ?? 0) - Number(b.split(":")[1] ?? 0))
       .map((key) => meta[key]);
-    const imageUri: string | undefined = meta.image_url ?? meta.image_large_url ?? meta.image_small_url;
     return {
       uri,
       title: meta.title ?? "",
       artist: artists.join(", "),
-      image: imageUri?.startsWith("spotify:image:")
-        ? `https://i.scdn.co/image/${imageUri.slice("spotify:image:".length)}`
-        : imageUri?.startsWith("https://")
-          ? imageUri
-          : null,
+      image: imageUrl(meta.image_url ?? meta.image_large_url ?? meta.image_small_url),
     };
   }
   return null;
-}
-
-function buildContent(next: NextTrack): HTMLElement {
-  const doc = card!.ownerDocument;
-  const wrap = doc.createElement("div");
-  wrap.className = "NextUpContent";
-
-  const art = doc.createElement("div");
-  art.className = "NextUpArt";
-  if (next.image) {
-    const img = doc.createElement("img");
-    img.src = next.image;
-    img.alt = "";
-    img.decoding = "async";
-    art.append(img);
-  }
-
-  const text = doc.createElement("div");
-  text.className = "NextUpText";
-  const label = doc.createElement("span");
-  label.className = "NextUpLabel";
-  label.textContent = "Next up";
-  const line = (className: string, value: string) => {
-    const outer = doc.createElement("span");
-    outer.className = className;
-    outer.dataset.text = value;
-    const inner = doc.createElement("span");
-    inner.className = "NextUpScroll";
-    inner.textContent = value;
-    outer.append(inner);
-    return outer;
-  };
-  text.append(label, line("NextUpTitle", next.title), line("NextUpArtist", next.artist));
-
-  wrap.append(art, text);
-  return wrap;
 }
 
 function host(): HTMLElement | null {
@@ -105,14 +73,147 @@ function host(): HTMLElement | null {
   return PageContainer.querySelector<HTMLElement>(".ContentBox");
 }
 
+function buildBody(next: NextTrack, shown: boolean): Body {
+  const doc = root!.ownerDocument;
+  const el = doc.createElement("div");
+  el.className = "NextUpBody";
+
+  const art = doc.createElement("div");
+  art.className = "NextUpArt";
+  if (next.image) {
+    const img = doc.createElement("img");
+    img.alt = "";
+    img.decoding = "async";
+    img.addEventListener("load", () => art.classList.add("Loaded"), { once: true });
+    img.src = next.image;
+    art.append(img);
+  }
+
+  const text = doc.createElement("div");
+  text.className = "NextUpText";
+  const label = doc.createElement("span");
+  label.className = "NextUpLabel";
+  label.textContent = "Up Next";
+  // Each line clips a single track the scroller moves.
+  const line = (className: string, value: string) => {
+    const box = doc.createElement("span");
+    box.className = className;
+    const track = doc.createElement("span");
+    track.className = "NextUpTrack";
+    track.textContent = value;
+    box.append(track);
+    return box;
+  };
+  const title = line("NextUpTitle", next.title);
+  const artist = line("NextUpArtist", next.artist);
+  text.append(label, title, artist);
+  el.append(art, text);
+  root!.append(el);
+
+  // Created once the lines are in the document, so its observers come from the right window.
+  // A body loaded ahead of its reveal waits paused; show() starts it.
+  const boxes = next.artist ? [title, artist] : [title];
+  const scroller = CreateTextScroller(boxes, {
+    holdOnReducedMotion: true,
+    overflowClass: "Overflowing",
+    paused: !shown,
+  });
+  return { el, scroller };
+}
+
+function dropBody(old: Body, fade: boolean) {
+  if (!fade) {
+    old.scroller?.destroy();
+    old.el.remove();
+    return;
+  }
+  old.el.classList.add("Leaving");
+  setTimeout(() => {
+    old.scroller?.destroy();
+    old.el.remove();
+  }, SWAP_MS + 40);
+}
+
+function setContent(next: NextTrack, crossfade: boolean) {
+  if (!root) return;
+  if (body) dropBody(body, crossfade);
+  body = buildBody(next, root.classList.contains("Shown"));
+  shownUri = next.uri;
+}
+
+/**
+ * The top of the pinned credit rows, measured from the bottom of the lyrics, when the setting holds
+ * them there.
+ */
+function syncCreditsOffset(box: HTMLElement) {
+  if (!root) return;
+  const container = box.querySelector<HTMLElement>(".LyricsContainer");
+  const height = container?.classList.contains("HasPinnedCredits")
+    ? container.style.getPropertyValue("--SL-PinnedCreditsHeight").trim()
+    : "";
+  const value = height ? `calc(${height} + 24px)` : "";
+  if (root.style.getPropertyValue("--NextUpCredits") === value) return;
+  if (value) root.style.setProperty("--NextUpCredits", value);
+  else root.style.removeProperty("--NextUpCredits");
+}
+
+/**
+ * The lyrics fade out a little higher while Up Next shows, so no line runs under it. The lift is
+ * how far the fade has to move to end just above the element, measured once per reveal.
+ */
+function liftLyrics(box: HTMLElement, lift: boolean) {
+  const container = box.querySelector<HTMLElement>(".LyricsContainer");
+  const content = container?.querySelector<HTMLElement>(".LyricsContent");
+  if (!container || !content) return;
+  if (!lift || !root) {
+    container.classList.remove("NextUpRoom");
+    liftedTop = null;
+    return;
+  }
+  const contentBottom = content.getBoundingClientRect().bottom;
+  const top = root.getBoundingClientRect().top;
+  liftedTop = top;
+  // Where the fade reaches transparent without the lift, measured from the bottom of the lyrics
+  // (main.css; PinnedCredits.css moves it above the pinned rows).
+  const fadeEnd = container.classList.contains("HasPinnedCredits")
+    ? (parseFloat(container.style.getPropertyValue("--SL-PinnedCreditsHeight")) || 0) + 24 + 8
+    : 16;
+  const room = Math.max(0, Math.round(contentBottom - top + LYRICS_CLEARANCE_PX - fadeEnd));
+  container.style.setProperty("--SL-NextUpRoom", `${room}px`);
+  container.classList.add("NextUpRoom");
+}
+
+function show(box: HTMLElement) {
+  if (!root || root.classList.contains("Shown")) return;
+  // Every reveal starts the title from its beginning.
+  body?.scroller?.resume();
+  root.classList.add("Shown");
+  liftLyrics(box, true);
+}
+
+function hide() {
+  if (!root?.classList.contains("Shown")) return;
+  root.classList.remove("Shown");
+  hiddenAt = performance.now();
+  // Hidden, the title's scroll would still restyle it every frame. It stops once the exit has
+  // played, so it doesn't jump back to its start while still fading.
+  const hiding = body;
+  setTimeout(() => {
+    if (body === hiding && !root?.classList.contains("Shown")) hiding?.scroller?.pause();
+  }, EXIT_MS);
+  const box = host();
+  if (box) liftLyrics(box, false);
+}
+
 function unmount() {
   if (ticker) clearInterval(ticker);
   ticker = null;
-  controlsObserver?.disconnect();
-  controlsObserver = null;
-  observedMediaBox = null;
-  card?.remove();
-  card = content = null;
+  const box = PageContainer?.querySelector<HTMLElement>(".ContentBox");
+  if (box) liftLyrics(box, false);
+  if (body) dropBody(body, false);
+  body = null;
+  root?.remove();
+  root = null;
   shownUri = null;
 }
 
@@ -122,166 +223,45 @@ function tick() {
     unmount();
     return;
   }
-  if (!card || card.parentElement !== box) {
-    card?.remove();
-    card = box.ownerDocument.createElement("div");
-    card.className = "NextUpCard";
-    card.setAttribute("aria-hidden", "true");
-    box.append(card);
-    content = null;
+  if (!root || root.parentElement !== box) {
+    // A rebuilt view: start over in the new box, and keep the ticker running.
+    if (body) dropBody(body, false);
+    body = null;
+    root?.remove();
     shownUri = null;
+    root = box.ownerDocument.createElement("div");
+    root.className = "NextUp";
+    // Steps past the Lyrics / Queue switch while it shows (ViewSwitchClearance.ts, NextUp.css).
+    ClaimSwitchClearance(root);
+    box.append(root);
+  }
+  syncCreditsOffset(box);
+  // Moved while it shows (pinned credits, a resize, a layout change): the lyrics make room again.
+  if (root.classList.contains("Shown") && liftedTop !== null) {
+    if (Math.abs(root.getBoundingClientRect().top - liftedTop) > 1) liftLyrics(box, true);
   }
 
-  followStageControls(box);
-  const next = readNextTrack();
-  const remaining = SpotifyPlayer.GetDuration() - SpotifyPlayer.GetPosition();
-  const show =
+  const next = forced ?? readNextTrack();
+  const duration = SpotifyPlayer.GetDuration();
+  const remaining = duration - SpotifyPlayer.GetPosition();
+  const wanted =
     !!next &&
-    // Repeat-one plays this song again, so nothing else is next.
-    SpotifyPlayer.LoopType !== "track" &&
-    SpotifyPlayer.GetDuration() > 0 &&
-    remaining <= SHOW_WITHIN_MS;
-  const isVisible = card.classList.contains("Visible");
+    (!!forced ||
+      // Repeat-one plays this song again, so nothing else is next.
+      (SpotifyPlayer.LoopType !== "track" && duration > 0 && remaining <= SHOW_WITHIN_MS));
+  const isShown = root.classList.contains("Shown");
 
-  if (!show) {
-    if (isVisible) hide();
-    // Loaded while hidden, so the card never opens on the song that's playing now and
-    // its cover is ready by the time it shows. Not until the fade-out has finished.
-    else if (next && next.uri !== shownUri && performance.now() - hiddenAt >= FADE_OUT_MS) setContent(next, false);
+  if (!wanted) {
+    if (isShown) hide();
+    // Loaded while hidden, so the cover is ready by the time it shows, and never swapped
+    // during the exit.
+    else if (next && next.uri !== shownUri && performance.now() - hiddenAt >= EXIT_MS) setContent(next, false);
     return;
   }
 
-  // The queue changed while it's showing: the new next track fades in over the old.
-  if (next.uri !== shownUri) setContent(next, isVisible);
-  if (!isVisible) {
-    // Every reveal starts the title from its beginning.
-    prepareScrolling();
-    card.classList.add("Visible");
-  }
-}
-
-/**
- * Title and artist that don't fit run past as a loop: the text, a gap, then the text
- * again, moved by exactly one text-and-gap so each loop starts where the last ended.
- */
-function prepareScrolling() {
-  if (!content) return;
-  for (const el of content.querySelectorAll<HTMLElement>(".NextUpTitle, .NextUpArtist")) {
-    const inner = el.querySelector<HTMLElement>(".NextUpScroll");
-    if (!inner) continue;
-    const text = el.dataset.text ?? "";
-    for (const animation of inner.getAnimations()) animation.cancel();
-    el.classList.remove("Scrolls");
-    inner.textContent = text;
-    if (el.scrollWidth - el.clientWidth <= 2) continue;
-
-    const doc = el.ownerDocument;
-    const copy = (hidden: boolean) => {
-      const part = doc.createElement("span");
-      part.className = "NextUpLoopPart";
-      part.textContent = text;
-      if (hidden) part.setAttribute("aria-hidden", "true");
-      return part;
-    };
-    // Three copies: the loop's offset plus the visible width never runs past the end.
-    inner.replaceChildren(copy(false), copy(true), copy(true));
-    // One part's width includes the gap after it (NextUp.css).
-    const distance = (inner.firstElementChild as HTMLElement).offsetWidth;
-    el.classList.add("Scrolls");
-    if (reducedMotion.matches) continue;
-    // The start: a pause, then speeding up to the steady pace. The ramp covers half the
-    // distance the steady pace would in that time, which is what this curve does.
-    const rampPx = (SCROLL_PX_PER_S * SCROLL_RAMP_MS) / 1000 / 2;
-    const start = inner.animate(
-      [
-        { transform: "translateX(0)", offset: 0 },
-        { transform: "translateX(0)", offset: SCROLL_PAUSE_MS / (SCROLL_PAUSE_MS + SCROLL_RAMP_MS), easing: "cubic-bezier(0.5, 0, 1, 1)" },
-        { transform: `translateX(${-rampPx}px)`, offset: 1 },
-      ],
-      { duration: SCROLL_PAUSE_MS + SCROLL_RAMP_MS, fill: "forwards" }
-    );
-    // Then it never stops: one copy's width per loop, and the copies line up, so the
-    // jump back each loop can't be seen.
-    start.finished
-      .then(() => {
-        inner.animate(
-          [{ transform: `translateX(${-rampPx}px)` }, { transform: `translateX(${-rampPx - distance}px)` }],
-          { duration: (distance / SCROLL_PX_PER_S) * 1000, iterations: Infinity }
-        );
-        start.cancel();
-      })
-      .catch(() => undefined); // Cancelled: a new song, or the card was rebuilt.
-  }
-}
-
-/**
- * Canvas Stage with the Now Bar on the right puts the view controls in this corner
- * while they show (they fade with the mouse). The card slides down below them then,
- * and back up when they go.
- */
-function followStageControls(box: HTMLElement) {
-  if (!card || !PageContainer) return;
-  const page = PageContainer.classList;
-  const shared =
-    page.contains("CanvasImmersive") &&
-    page.contains("NowBarSide__Right") &&
-    !page.contains("CompactMode") &&
-    !page.contains("ForcedCompactMode");
-  const mediaBox = shared ? box.querySelector<HTMLElement>(".NowBar .MediaBox") : null;
-  const controls = mediaBox?.querySelector<HTMLElement>(".ViewControls") ?? null;
-
-  if (!mediaBox || !controls) {
-    controlsObserver?.disconnect();
-    controlsObserver = null;
-    observedMediaBox = null;
-    card.classList.remove("BelowControls");
-    return;
-  }
-
-  // Measured at rest: the row slides in with a translate while it appears.
-  const slide = parseFloat(getComputedStyle(controls).translate.split(" ")[1] ?? "0") || 0;
-  const controlsBottom = controls.getBoundingClientRect().bottom - slide;
-  const cardTop = card.getBoundingClientRect().top - (parseFloat(getComputedStyle(card).translate.split(" ")[1] ?? "0") || 0);
-  card.style.setProperty("--NextUpDrop", `${Math.max(0, Math.round(controlsBottom + 10 - cardTop))}px`);
-
-  if (observedMediaBox !== mediaBox) {
-    controlsObserver?.disconnect();
-    observedMediaBox = mediaBox;
-    const sync = () => {
-      const opacity = parseFloat(mediaBox.style.getPropertyValue("--ControlsOpacity")) || 0;
-      card?.classList.toggle("BelowControls", opacity > 0.05);
-    };
-    controlsObserver = new MutationObserver(sync);
-    controlsObserver.observe(mediaBox, { attributes: true, attributeFilter: ["style"] });
-    sync();
-  }
-}
-
-function hide() {
-  if (!card?.classList.contains("Visible")) return;
-  card.classList.remove("Visible");
-  hiddenAt = performance.now();
-  // Hidden, the scrolling waits; the next reveal starts it from the beginning.
-  for (const animation of card.getAnimations({ subtree: true })) {
-    if (animation instanceof CSSTransition) continue;
-    animation.pause();
-  }
-}
-
-function setContent(next: NextTrack, crossfade: boolean) {
-  if (!card) return;
-  const previous = content;
-  if (crossfade && previous) {
-    previous.classList.add("Leaving");
-    setTimeout(() => previous.remove(), 300);
-  } else {
-    previous?.remove();
-  }
-  content = buildContent(next);
-  if (crossfade) content.classList.add("Entering");
-  card.append(content);
-  shownUri = next.uri;
-  if (crossfade) prepareScrolling();
+  // The queue changed while it shows: the new track crossfades over the old.
+  if (next.uri !== shownUri) setContent(next, isShown);
+  if (!isShown) show(box);
 }
 
 function sync() {
@@ -293,13 +273,33 @@ function sync() {
   }
 }
 
+/** Console hook: show Up Next now with a stand-in track, or pass nothing to go back to the queue. */
+export function ForceNextUp(track?: Partial<NextTrack> | null) {
+  forced = track
+    ? {
+        uri: track.uri ?? `spotify:track:forced-${Date.now()}`,
+        title: track.title ?? "",
+        artist: track.artist ?? "",
+        image: track.image ?? null,
+      }
+    : null;
+  sync();
+}
+
 Global.Event.listen("fullscreen:open", () => setTimeout(sync, 0));
 Global.Event.listen("fullscreen:exit", unmount);
 Global.Event.listen("page:destroy", unmount);
 Global.Event.listen("playback:songchange", () => {
-  // The next track is now playing; hide straight away rather than on the next tick.
+  // The next track is now playing, so it leaves at once rather than on the next tick.
   hide();
   sync();
+});
+// A side swap moves it to the other end of the column; it fades in there instead of jumping.
+Global.Event.listen("nowbar:side-swap:after", () => {
+  if (!root?.classList.contains("Shown")) return;
+  root.animate([{ opacity: 0, offset: 0 }], { duration: 240, easing: "ease-out" });
+  const box = host();
+  if (box) requestAnimationFrame(() => liftLyrics(box, true));
 });
 onExperimentChange((exp) => {
   if (exp.id === "nextUpCard") sync();

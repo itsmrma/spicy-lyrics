@@ -1,4 +1,4 @@
-import { $lyricsContainerExists, $simpleLyricsMode } from "../../../../utils/stores.ts";
+import { $lyricsContainerExists, isBloomRenderer } from "../../../../utils/stores.ts";
 import { PageContainer } from "../../../../components/Pages/PageView.ts";
 import { applyStyles, removeAllStyles } from "../../../CSS/Styles.ts";
 import {
@@ -53,7 +53,7 @@ interface LyricsData {
 export function ApplyLineLyrics(data: LyricsData, UseRomanized: boolean = false): void {
   if (!$lyricsContainerExists.get()) return;
   // Under each line, the line keeps its own text and the romanization gets a row below it.
-  const UnderLine = RomanizeUnderLine(UseRomanized);
+  const UnderLine = RomanizeUnderLine();
   const ShowRomanized = UseRomanized && !UnderLine;
   EmitNotApplyed();
 
@@ -203,7 +203,7 @@ export function ApplyLineLyrics(data: LyricsData, UseRomanized: boolean = false)
     const lineEndTimeAndNextLineStartTimeDistance =
       nextLineStartTime !== 0 ? nextLineStartTime - line.EndTime : 0;
 
-    const lineEndTime = $simpleLyricsMode.get()
+    const lineEndTime = isBloomRenderer()
       ? nextLineStartTime === 0
         ? line.EndTime
         : lineEndTimeAndNextLineStartTimeDistance < getLyricsBetweenShow() &&
@@ -217,6 +217,7 @@ export function ApplyLineLyrics(data: LyricsData, UseRomanized: boolean = false)
       StartTime: ConvertTime(line.StartTime),
       EndTime: ConvertTime(lineEndTime),
       TotalTime: ConvertTime(lineEndTime) - ConvertTime(line.StartTime),
+      LeadEndTime: ConvertTime(line.EndTime),
     });
 
     if (line.OppositeAligned) {

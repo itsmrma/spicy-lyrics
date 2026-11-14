@@ -17,9 +17,10 @@ import { StripZeroWidth } from "./StripZeroWidth.ts";
 // row keeps pace with the words above it however they are joined or split.
 // Line-synced and static rows are plain text that follows the line's state.
 
-// Whether this apply draws the romanization under each line.
-export const RomanizeUnderLine = (useRomanized: boolean): boolean =>
-  useRomanized && $romanizationDisplay.get() === "underLine";
+// Whether this apply builds the rows under each line. They're built with
+// romanization off too, collapsed until the page has RomanizedRowsShown, so the
+// toggle opens and closes them in place instead of rendering the lyrics again.
+export const RomanizeUnderLine = (): boolean => $romanizationDisplay.get() === "underLine";
 
 interface RomanizedPiece {
   HTMLElement: HTMLElement;

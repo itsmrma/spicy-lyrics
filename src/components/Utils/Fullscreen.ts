@@ -140,6 +140,19 @@ export const SetControlsDragLock = (locked: boolean) => {
   if (!locked) ToggleControls(true);
 };
 
+// The spring's goal as a state on the MediaBox, for layouts that fade their controls with a short CSS
+// transition instead of following the spring (the view controls beside the cover, PlayerBelowCover.css).
+// Written only when it changes, so it costs one style change per hover change, not one per frame.
+const SetControlsState = (goal: number) => {
+  const mediaBox = PageContainer?.querySelector<HTMLElement>(".ContentBox .NowBar .Header .MediaBox");
+  if (!mediaBox) return;
+  const state = goal <= 0 ? "Hidden" : goal < 0.9 ? "Dim" : "Full";
+  if (mediaBox.dataset.controls !== state) mediaBox.dataset.controls = state;
+  // The Lyrics / Queue switch in the corner (QueueView.ts) comes and goes with the controls.
+  const viewSwitch = PageContainer?.querySelector<HTMLElement>(".ContentBox > .ViewSwitch");
+  if (viewSwitch && viewSwitch.dataset.controls !== state) viewSwitch.dataset.controls = state;
+};
+
 const ToggleControls = (force: boolean = false) => {
   if (controlsDragLock) return;
 
@@ -177,8 +190,10 @@ const ToggleControls = (force: boolean = false) => {
     spring.SetDampingRatio(immersive ? 1 : 2);
   }
 
-  controlsOpacitySpring.SetGoal(getControlsOpacityGoal());
+  const controlsGoal = getControlsOpacityGoal();
+  controlsOpacitySpring.SetGoal(controlsGoal);
   artworkBrightnessSpring.SetGoal(getArtworkBrightnessGoal());
+  SetControlsState(controlsGoal);
 
   if (force || visualsApplied === false) {
     visualsApplied = true;

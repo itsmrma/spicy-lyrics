@@ -136,13 +136,29 @@ export const EXPERIMENTS = [
     pageClass: "Exp_RefinedBackground",
   },
   {
-    id: "refreshedSimpleLyrics",
-    category: "lyrics",
-    label: "Refreshed Simple Lyrics Mode",
+    id: "musicReactiveBackground",
+    category: "background",
+    label: "Music-Reactive Background",
     description:
-      "In Simple Lyrics Mode, the sung part of a line fades in behind one soft edge that runs on from word to word without stopping, words float up as they're sung with the next already rising before the last has settled, the part still to come stays a little brighter, and the letters of a short held word swell, spread apart, lift and glow one after another, then ease back, stronger the longer the word is held. Lines sit further apart and follow the song in a ripple, each catching up a moment after the one above it. Interlude dots fill in one by one while the group slowly breathes. Its scrolling takes over from Smooth Scrolling while it's on. Disable to bring back the previous Simple Lyrics look.",
+      "The Dynamic (Kawarp) background follows the song as it plays: it flows faster and swells slightly through loud parts, and slows through quiet ones. On the lyrics page, in Cinema View and in fullscreen it's also less blurred, so the movement shows. Disable to bring back the steadier, more blurred flow that only loosely follows the tempo.",
+    default: true,
+  },
+  {
+    id: "largerCinemaLyrics",
+    category: "lyrics",
+    label: "Larger Cinema View Lyrics (Bloom style only)",
+    description:
+      "In Cinema View and fullscreen, Bloom lyrics grow with the screen instead of stopping at their usual size, so they read well from a distance on a big display. Small windows, the popup and compact mode keep the usual size. Disable to keep the usual size everywhere.",
     default: false,
-    pageClass: "Exp_RefreshedSimpleLyrics",
+    pageClass: "Exp_LargerCinemaLyrics",
+  },
+  {
+    id: "springLineSpacing",
+    category: "lyrics",
+    label: "Increased Line Spacing (Spring style only)",
+    description:
+      "With the Spring renderer style, lyrics lines sit further apart, spaced by the text size like Bloom (a little tighter) instead of by a sliver of the window width. Disable to bring back Spring's tighter spacing.",
+    default: true,
   },
   {
     id: "refinedCredits",
@@ -167,8 +183,8 @@ export const EXPERIMENTS = [
     category: "lyrics",
     label: "Background Vocal Pop-Out",
     description:
-      "Background vocal lines stay tucked away under their line until it's sung, then slide out from beneath it while the lines below make room, and tuck back in once both are done. Only applies in Simple Lyrics Mode with Refreshed Simple Lyrics Mode on. Disable to keep every background vocal line on screen at all times.",
-    default: false,
+      "Background vocal lines stay tucked away under their line until it's sung, then slide out from beneath it while the lines below make room, and tuck back in once both are done. Only applies with the Bloom renderer style. Disable to keep every background vocal line on screen at all times.",
+    default: true,
     pageClass: "Exp_BackgroundLinePop",
   },
   {
@@ -176,7 +192,7 @@ export const EXPERIMENTS = [
     category: "lyrics",
     label: "Keep Overlapping Lines",
     description:
-      "In Minimal Lyrics Mode, a line that ends while one above it is still being sung (overlapping lines, background vocals) stays on screen, dimmed, instead of fading out early. Disable to fade every sung line out as soon as it ends.",
+      "With Fade Away Previous Lines on, a line that ends while one above it is still being sung (overlapping lines, background vocals) stays on screen, dimmed, instead of fading out early. Disable to fade every sung line out as soon as it ends.",
     default: true,
     pageClass: "Exp_KeepOverlappingLines",
   },
@@ -185,7 +201,7 @@ export const EXPERIMENTS = [
     category: "player",
     label: "Portrait Fullscreen Layout",
     description:
-      "In compact fullscreen on a window taller than it is wide, the lyrics use nearly the full width, the cover header sits as far from the top as the lyrics are from the sides, the song title and artist are centred beside the cover and sized to the lyrics, and the cover grows on hover without covering them. Disable to bring back the regular compact layout.",
+      "In compact fullscreen on a window taller than it is wide, the lyrics use nearly the full width, the cover header sits as far from the top as the lyrics are from the sides, the song title and artist sit beside the cover, level with its bottom edge, and are sized to the lyrics, and the cover grows on hover without covering them. Disable to bring back the regular compact layout.",
     default: true,
     pageClass: "Exp_PortraitFullscreen",
   },
@@ -200,11 +216,29 @@ export const EXPERIMENTS = [
   {
     id: "nextUpCard",
     category: "player",
-    label: "Next Up",
+    label: "Up Next",
     description:
-      "In fullscreen and Cinema View, the last 30 seconds of a song show the next one in the queue (cover, title and artist) in the corner above the lyrics. Disable to never show it.",
+      "In fullscreen and Cinema View, the last 30 seconds of a song show the next one in the queue (cover, title and artist) at the bottom of the lyrics. Disable to never show it.",
     default: true,
     pageClass: "Exp_NextUpCard",
+  },
+  {
+    id: "playerBelowCover",
+    category: "player",
+    label: "Player Below the Cover",
+    description:
+      "In Cinema View, when no Canvas is showing, the cover moves out toward the screen edge and the player sits under it, always on screen: the title and artist with the like button beside them, then the progress bar with its times, the playback controls and the volume bar. The view buttons line up in a column beside the cover instead of over it. Disable to keep the centered cover and title, with the controls that appear over the cover.",
+    default: false,
+    pageClass: "Exp_PlayerBelowCover",
+  },
+  {
+    id: "groupedViewControls",
+    category: "player",
+    label: "Grouped View Controls",
+    description:
+      "The view buttons share one frosted capsule instead of each having its own. Buttons that switch something on, like romanization, compact mode or the NowBar, fill in white with their icon cut out while it is on. The button back to the current line becomes a matching frosted circle in the bottom corner. Disable to bring back the separate frosted buttons that change their icon instead, and the round button at the lyrics' edge.",
+    default: true,
+    pageClass: "Exp_GroupedViewControls",
   },
 ] as const satisfies readonly Experiment[];
 

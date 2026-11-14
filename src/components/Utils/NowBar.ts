@@ -759,6 +759,7 @@ function OpenNowBar(skipSaving: boolean = false) {
                     <div class="VolumeFill"></div>
                     <div class="Handle"></div>
                     <div class="VolumeIcon">${Icons.Volume}</div>
+                    <div class="VolumeMaxIcon">${Icons.VolumeFull}</div>
                 `;
 
         // Same trick the Heart uses — the SVG would otherwise swallow the clicks
@@ -1718,8 +1719,12 @@ function NowBar_SwapSides() {
 }
 
 function ApplySideSwap() {
+  // Listeners measure before and after, so what sits on the lyrics side (the queue, QueueView.ts)
+  // can slide across with the lyrics instead of jumping.
+  Global.Event.evoke("nowbar:side-swap:before", null);
   $nowBarSide.set($nowBarSide.get() === "right" ? "left" : "right");
   Session_NowBar_SetSide();
+  Global.Event.evoke("nowbar:side-swap:after", null);
 }
 
 // The side the page shows: the stored one, except that compact mode and the centred

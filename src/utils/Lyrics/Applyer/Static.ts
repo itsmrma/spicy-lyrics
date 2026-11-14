@@ -49,7 +49,7 @@ export interface StaticLyricsData {
 export function ApplyStaticLyrics(data: StaticLyricsData, UseRomanized: boolean = false): void {
   if (!$lyricsContainerExists.get()) return;
   // Under each line, the line keeps its own text and the romanization gets a row below it.
-  const UnderLine = RomanizeUnderLine(UseRomanized);
+  const UnderLine = RomanizeUnderLine();
   const ShowRomanized = UseRomanized && !UnderLine;
 
   EmitNotApplyed();

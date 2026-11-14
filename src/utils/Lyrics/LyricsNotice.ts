@@ -3,6 +3,7 @@ import { IsCompactMode } from "../../components/Utils/CompactMode.ts";
 import Fullscreen from "../../components/Utils/Fullscreen.ts";
 import { SyncNowBarSide } from "../../components/Utils/NowBar.ts";
 import { BuildBugReport, CopyText, DISCORD_INVITE_URL } from "../BugReport.ts";
+import { IsQueueOpen } from "../../components/Utils/QueueView.ts";
 import { $showNoLyricsNotice } from "../stores.ts";
 
 type NoticeCopy = {
@@ -110,6 +111,8 @@ export function SetShownNotice(descriptor: string | null): void {
 
 function shouldHideLyricsArea(): boolean {
   if (!shownNotice || !PageContainer) return false;
+  // The open queue takes the lyrics column, so the column stays.
+  if (IsQueueOpen()) return false;
   // The NPV card has its own switch (Hide When a Song Has No Lyrics), which removes it.
   if (IsCardMode) return false;
   if (!$showNoLyricsNotice.get() && NO_LYRICS_NOTICES.has(shownNotice)) return true;

@@ -25,7 +25,7 @@ export const REVIEWER_SETTINGS: readonly { key: string; value: unknown; shown: s
   { key: "smoothScrolling", value: false, shown: "Off" },
   { key: "animationFpsCapEnabled", value: false, shown: "Off" },
   // Lyrics: anything that hides lines or changes how they're split or animated.
-  { key: "simpleLyricsMode", value: false, shown: "Off" },
+  { key: "rendererVisualStyle", value: "spring", shown: "Spring" },
   { key: "minimalLyricsMode", value: false, shown: "Off" },
   { key: "syllableMerge", value: "off", shown: "Off" },
   { key: "lineHoverBackground", value: true, shown: "On" },
