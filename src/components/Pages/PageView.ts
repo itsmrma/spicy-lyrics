@@ -1,5 +1,5 @@
 import { createTooltip } from "../../utils/tooltip.ts";
-import fetchLyrics, { ShowQueueLoader } from "../../utils/Lyrics/fetchLyrics.ts";
+import fetchLyrics, { HoldsTemporaryUpload, ShowQueueLoader } from "../../utils/Lyrics/fetchLyrics.ts";
 import { LyricsQueueRetry } from "../../utils/Lyrics/LyricsQueueRetry.ts";
 import { SkeletonMarkup } from "../../utils/Lyrics/LyricsSkeleton.ts";
 import { $forceCompactMode } from "../../utils/uiState.ts";
@@ -837,31 +837,30 @@ function AppendViewControls(ReAppend: boolean = false) {
 
 // --- Reactive setting subscriptions ---
 
+// Rebuilds the lyrics after a setting that shapes them changes. A "Just once" upload
+// rebuilds from what's held: refetching would swap it for the song's normal lyrics.
+function rebuildLyrics() {
+  const uri = SpotifyPlayer.GetUri();
+  if (!HoldsTemporaryUpload(uri)) $currentLyricsData.set("");
+  if (uri) fetchLyrics(uri).then(ApplyLyrics);
+}
+
 $simpleLyricsMode.listen((v) => {
   if (!PageContainer) return;
   PageContainer.classList.toggle("SimpleLyricsMode", v);
-  const uri = SpotifyPlayer.GetUri();
-  $currentLyricsData.set("");
-  if (uri) fetchLyrics(uri).then(ApplyLyrics);
+  rebuildLyrics();
 });
 
 $minimalLyricsMode.listen((v) => {
   if (!PageContainer) return;
   PageContainer.classList.toggle("MinimalLyricsMode", v);
-  const uri = SpotifyPlayer.GetUri();
-  $currentLyricsData.set("");
-  if (uri) fetchLyrics(uri).then(ApplyLyrics);
+  rebuildLyrics();
 });
 
-const reapplyLyrics = () => {
-  const uri = SpotifyPlayer.GetUri();
-  $currentLyricsData.set("");
-  if (uri) fetchLyrics(uri).then(ApplyLyrics);
-};
-$syllableMerge.listen(reapplyLyrics);
-$syllablePace.listen(reapplyLyrics);
+$syllableMerge.listen(rebuildLyrics);
+$syllablePace.listen(rebuildLyrics);
 $romanizationDisplay.listen(() => {
-  if (isRomanized) reapplyLyrics();
+  if (isRomanized) rebuildLyrics();
 });
 
 // CSS sizes the text. The list's cached row heights and scroll position are JS, so those follow.
@@ -910,9 +909,7 @@ onExperimentChange((experiment) => {
     (experiment.id === "refreshedSimpleLyrics" && $simpleLyricsMode.get()) ||
     experiment.id === "romajiAsWritten"
   ) {
-    const uri = SpotifyPlayer.GetUri();
-    $currentLyricsData.set("");
-    if (uri) fetchLyrics(uri).then(ApplyLyrics);
+    rebuildLyrics();
   }
 });
 onExperimentDefinitionChange(() => {
