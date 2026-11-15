@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/itsmrma/spicy-lyrics/actions/workflows/ci.yml/badge.svg)](https://github.com/itsmrma/spicy-lyrics/actions/workflows/ci.yml)
 
-A fork of [Spicy Lyrics](https://github.com/spikerko/spicy-lyrics) maintained by [itsmrma](https://github.com/itsmrma), built around one question: **how little CPU and GPU can the animated lyrics view get away with while still feeling alive?**
+A fork of [Spicy Lyrics](https://github.com/spikerko/spicy-lyrics) maintained by [itsmrma](https://github.com/itsmrma), built around wanting less resource usage and lyrics association.**
 
 Spicy Lyrics replaces Spotify's lyrics view with animated lyrics, dynamic backgrounds, romanization, and customization options. It is an open-source extension for the Spotify desktop client, built on [Spicetify](https://spicetify.app).
 
@@ -220,7 +220,7 @@ export default {
 ```
 
 3. Click **Deploy**.
-4. Test in your browser: `https://<your-worker>.workers.dev/?title=Butter&artist=BTS` (returns JSON lyrics).
+4. Test in your browser: `https://<your-worker>.workers.dev/?title=NORMAL&artist=BTS` (returns JSON lyrics).
 5. In Spotify, paste your Worker URL (`https://<your-worker>.workers.dev`) into **Settings → Lyrics → Genius Proxy URL**.
 
 ## Installation
