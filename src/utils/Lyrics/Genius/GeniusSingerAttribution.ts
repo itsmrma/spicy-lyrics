@@ -6,6 +6,7 @@ import {
 import { RetrievePackage } from "../../ImportPackage.ts";
 import Logger from "../../Logger.ts";
 import { isExperimentEnabled } from "../../experiments.ts";
+import { getRemoteConfig } from "../../remoteConfig.ts";
 import { $geniusAccessToken, $geniusProxyUrl } from "../../stores.ts";
 
 const geniusLogger = new Logger("Genius Singers");
@@ -1630,10 +1631,84 @@ export function mergeUndeterminedSections(
   });
 }
 
+/** A network call that gives up instead of holding the singer badges (and the retry chain) up. */
+function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
+  const ms = getRemoteConfig().singers.requestTimeoutMs;
+  return fetch(input, { ...init, signal: AbortSignal.timeout(ms) });
+}
+
+const inFlightSections = new Map<string, Promise<GeniusSection[] | null>>();
+
 /**
- * Searches Genius and fetches the lyrics section breakdown.
+ * Searches Genius and fetches the lyrics section breakdown. Concurrent calls for the same
+ * song share one request, so a prefetch started with the lyrics fetch is the one the
+ * enrichment later joins.
  */
-export async function fetchGeniusSections(
+export function fetchGeniusSections(
+  title: string,
+  artist: string
+): Promise<GeniusSection[] | null> {
+  const key = `${artist.toLowerCase()} - ${title.toLowerCase()}`;
+  const running = inFlightSections.get(key);
+  if (running) return running;
+  const job = fetchGeniusSectionsUncached(title, artist).finally(() => {
+    inFlightSections.delete(key);
+  });
+  inFlightSections.set(key, job);
+  return job;
+}
+
+/** Starts the Genius lookup early, so it overlaps with fetching the lyrics themselves. */
+export function prefetchGeniusSections(title?: string, artist?: string): void {
+  if (!title || !artist || !isExperimentEnabled("geniusSingerAttribution")) return;
+  fetchGeniusSections(title, artist).catch(() => {});
+}
+
+/** The next few real tracks in the queue, as the title and first artist Genius is searched with. */
+function readUpcomingTracks(count: number): Array<{ title: string; artist: string }> {
+  const out: Array<{ title: string; artist: string }> = [];
+  for (const entry of Spicetify.Queue?.nextTracks ?? []) {
+    if (out.length >= count) break;
+    const track = entry?.contextTrack;
+    if (!(track?.uri ?? "").startsWith("spotify:track:")) continue;
+    const meta = track.metadata ?? {};
+    if (meta.is_advertisement === "true") continue;
+    const artistKey = Object.keys(meta)
+      .filter((key) => /^artist_name(:\d+)?$/.test(key))
+      .sort((a, b) => Number(a.split(":")[1] ?? 0) - Number(b.split(":")[1] ?? 0))[0];
+    const title: string | undefined = meta.title;
+    const artist: string | undefined = artistKey ? meta[artistKey] : undefined;
+    if (title && artist) out.push({ title, artist });
+  }
+  return out;
+}
+
+let queuePrefetchTimer: ReturnType<typeof setTimeout> | undefined;
+let queuePrefetchRun = 0;
+
+/**
+ * Looks the next few queued songs up while the current one plays, one at a time and only after
+ * `queuePrefetchDelayMs`, so it never competes with the current song's own lookup. Results land
+ * in the same cache the lyrics view reads, so those songs show their singers at once. A newer
+ * call (the next song change) replaces a run still in progress.
+ */
+export function scheduleQueueSingerPrefetch(): void {
+  if (!isExperimentEnabled("geniusSingerAttribution")) return;
+  const { queuePrefetch, queuePrefetchDelayMs } = getRemoteConfig().singers;
+  if (queuePrefetch <= 0) return;
+  clearTimeout(queuePrefetchTimer);
+  const run = ++queuePrefetchRun;
+  queuePrefetchTimer = setTimeout(async () => {
+    for (const { title, artist } of readUpcomingTracks(queuePrefetch)) {
+      if (run !== queuePrefetchRun) return;
+      try {
+        await fetchGeniusSections(title, artist);
+      } catch {}
+    }
+  }, queuePrefetchDelayMs);
+}
+
+async function fetchGeniusSectionsUncached(
   title: string,
   artist: string
 ): Promise<GeniusSection[] | null> {
@@ -1717,7 +1792,7 @@ export async function fetchGeniusSections(
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       geniusLogger.debug("Fetching from Genius proxy", { url: u.toString() });
-      const res = await fetch(u.toString(), { headers });
+      const res = await fetchWithTimeout(u.toString(), { headers });
       if (!res.ok) {
         geniusLogger.warn("Genius proxy returned error", { status: res.status });
         return null;
@@ -1754,7 +1829,7 @@ export async function fetchGeniusSections(
 
     for (const url of candidateUrls) {
       try {
-        const songRes = await fetch(url);
+        const songRes = await fetchWithTimeout(url);
         if (songRes.ok) {
           const html = await songRes.text();
           const sections = parseGeniusLyrics(html);
@@ -1801,7 +1876,7 @@ export async function fetchGeniusSections(
         Accept: "application/json",
       };
 
-      const res = await fetch(searchUrl, { headers });
+      const res = await fetchWithTimeout(searchUrl, { headers });
       if (res.ok) {
         const data = await res.json();
         const hits = data?.response?.hits;
@@ -1858,7 +1933,7 @@ export async function fetchGeniusSections(
   if (!foundSections || sectionsHaveCjkSingers(foundSections)) {
     try {
       const searchQuery = `${cleanArt} ${cleanTitle}`.trim();
-      const searchRes = await fetch(
+      const searchRes = await fetchWithTimeout(
         `https://dumb.bloat.cat/search?q=${encodeURIComponent(searchQuery)}`
       );
       if (searchRes.ok) {

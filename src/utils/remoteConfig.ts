@@ -56,6 +56,17 @@ export const DEFAULT_REMOTE_CONFIG = {
     loaderRevealDelayMs: 2000,
     safetyNetRefetchDelayMs: 1000,
   },
+  singers: {
+    // How long the lyrics wait for the Genius singer lookup before they are shown without
+    // badges; the badges are added as soon as the lookup lands.
+    waitMs: 1200,
+    // Per request to the proxy / Genius while looking singers up.
+    requestTimeoutMs: 8000,
+    // How many queued songs get their singers looked up ahead of time (0 turns it off), and how
+    // long after a song change that starts.
+    queuePrefetch: 3,
+    queuePrefetchDelayMs: 3000,
+  },
   cache: {
     lyricsTtlDays: 3,
     artistVisualsTtlDays: 3,

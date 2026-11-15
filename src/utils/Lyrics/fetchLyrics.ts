@@ -6,7 +6,7 @@ import PageView, { PageContainer } from "../../components/Pages/PageView.ts";
 import { Query, QueryHttpError, QueryNetworkError } from "../API/Query.ts";
 import { IsTripStatus, ServiceUnavailableError } from "../API/CircuitBreaker.ts";
 import { JapaneseRomajiIsCurrent, ProcessLyrics } from "./ProcessLyrics.ts";
-import { enrichLyricsWithGeniusSingers } from "./Genius/GeniusSingerAttribution.ts";
+import { enrichLyricsWithGeniusSingers, prefetchGeniusSections, scheduleQueueSingerPrefetch } from "./Genius/GeniusSingerAttribution.ts";
 import { IsEmptyLyrics } from "./EmptyLines.ts";
 import Logger from "../Logger.ts";
 import { LocalLyricsManager } from "./manager/index.ts";
@@ -45,14 +45,57 @@ export const LyricsStore = GetExpireStore<any>(LYRICS_STORE_NAME, 7, {
 
 const lyricsPacker = new SLObjPack();
 
-async function enrichWithSingers(lyricsData: any): Promise<void> {
+/** Every singer on every line, as one string: cheap to compare before and after an enrichment. */
+function singerSignature(lyrics: any): string {
+  const lines: any[] =
+    lyrics?.Type === "Static" ? (lyrics.Lines ?? []) : (lyrics?.Content ?? []);
+  let out = "";
+  for (const l of lines) out += `${l?.Singer ?? l?.Lead?.Singer ?? ""}\u0001`;
+  return out;
+}
+
+/** Starts the Genius lookup now, so it runs while the lyrics themselves are still being fetched. */
+function prefetchSingers(uri: string): void {
+  try {
+    if (SpotifyPlayer.GetUri() !== uri) return;
+    prefetchGeniusSections(SpotifyPlayer.GetName(), SpotifyPlayer.GetArtists()?.[0]?.name);
+    scheduleQueueSingerPrefetch();
+  } catch {}
+}
+
+/**
+ * Adds singer badges, but never holds the lyrics up for long: after `singers.waitMs` they are
+ * shown as they are, and once the lookup lands the lyrics are applied again with the badges.
+ * A song whose singers are cached resolves in milliseconds, well inside that wait.
+ */
+async function enrichWithSingers(lyricsData: any, uri: string): Promise<void> {
   try {
     const title = SpotifyPlayer.GetName();
     const artists = SpotifyPlayer.GetArtists();
     const artist = artists?.[0]?.name;
-    if (title && artist) {
-      await enrichLyricsWithGeniusSingers(lyricsData, title, artist, artists);
-    }
+    if (!title || !artist) return;
+
+    const before = singerSignature(lyricsData);
+    const job = enrichLyricsWithGeniusSingers(lyricsData, title, artist, artists);
+    let waitTimer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      job.then(() => "done" as const),
+      new Promise<"late">((resolve) => {
+        waitTimer = setTimeout(() => resolve("late"), getRemoteConfig().singers.waitMs);
+      }),
+    ]);
+    clearTimeout(waitTimer);
+    if (outcome === "done") return;
+
+    job
+      .then(async () => {
+        if (singerSignature(lyricsData) === before) return;
+        if (SpotifyPlayer.GetUri() !== uri) return;
+        $currentLyricsData.set(JSON.stringify(lyricsData));
+        const { default: ApplyLyrics } = await import("./Global/Applyer.ts");
+        await ApplyLyrics([lyricsData, 200, uri]);
+      })
+      .catch((err) => lyricsLogger.debug("Late singer attribution error", err));
   } catch (err) {
     lyricsLogger.debug("Singer attribution enrichment error", err);
   }
@@ -247,6 +290,7 @@ export default async function fetchLyrics(uri: string): Promise<FetchLyricsResul
 
 async function runFetchLyrics(uri: string): Promise<[object | string, number] | null> {
   lyricsLogger.debug("Fetch requested", uri);
+  prefetchSingers(uri);
   if (lastFailure?.uri === uri) lastFailure = null;
   //if (!PageContainer) return;
   const LyricsContent =
@@ -339,7 +383,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
               lyricsData = refreshed;
             }
           }
-          await enrichWithSingers(lyricsData);
+          await enrichWithSingers(lyricsData, uri);
           $currentLyricsData.set(JSON.stringify(lyricsData));
           // Shown again: keep where they first came from, when that's known.
           if (lastAnswer?.uri !== uri) lastAnswer = { uri, from: "already loaded" };
@@ -360,7 +404,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
     // Local TTML is parsed fresh on every read, so it needs the same derivation
     // a remote payload gets — otherwise a locally stored song has no romanization.
     await ProcessLyrics(lyricsData);
-    await enrichWithSingers(lyricsData);
+    await enrichWithSingers(lyricsData, uri);
     if (isStaleFetch(uri)) return [lyricsData, 200];
     lastAnswer = { uri, from: "Local DB" };
     $currentLyricsData.set(JSON.stringify(lyricsData));
@@ -396,7 +440,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
         // detection run here, against the current build, instead of serving
         // whatever an older build derived.
         await ProcessLyrics(lyricsFromCache);
-        await enrichWithSingers(lyricsFromCache);
+        await enrichWithSingers(lyricsFromCache, uri);
         lastAnswer = { uri, from: "cache" };
         $currentLyricsData.set(JSON.stringify(lyricsFromCache));
         presentLyrics(lyricsFromCache);
@@ -562,7 +606,7 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
     const rawLyrics = structuredClone(lyrics);
 
     const romanizedInFull = await ProcessLyrics(lyrics);
-    await enrichWithSingers(lyrics);
+    await enrichWithSingers(lyrics, uri);
 
     // Pruning blank lines can empty out a payload the API still counted as a
     // hit. Nothing would render, so treat it as a miss rather than caching and
