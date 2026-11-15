@@ -52,23 +52,131 @@ For songs performed by groups (e.g. BTS) or collaborations:
 - Automatically searches and fetches section-level singer tags from Genius (`[Verse 1: Jungkook]`, `[Chorus: All]`, `[Verse 2: RM & SUGA]`, etc.).
 - **Multi-singer breakdown**: recognizes Genius transcription guidelines where multiple vocalists in the same section are distinguished by style (1st vocalist = standard, 2nd vocalist = italic, 3rd vocalist = bold, 4th = bold-italic) to attribute only the active singer singing at that moment.
 - **Zero-shift gutter placement**: singer badges sit in the left gutter beside the lyrics without displacing or altering the original lyrics layout and horizontal alignment. In case of multi-singer moments or long names, badges cleanly stack vertically.
+- **No guessing**: when a header lists several singers in turn (`[Verse 1: Jungkook, V, Jimin, Jin]`) but nothing on the lines says who sings which, the section is left unattributed instead of stamping every name on every line. In that case the romanized Genius page is fetched too and, if it marks the lines, its per-line attribution fills the section in. Choruses and headers joined with `&` keep showing everyone.
+- **Safe alignment**: a bare `[Verse 2]` no longer inherits the singer of `[Verse 1: X]`, lines with no match take the singer of the nearest section by position, and nothing is assigned when too few lines match the Genius page (a different version or language).
 - **Persistent Caching**: once fetched, singer breakdowns are saved in persistent storage (`Spicetify.LocalStorage`) for instant 0ms loads on replay.
 - Can be toggled in **Settings → Experiments** (`Genius Singer Attribution`).
 
 #### Setting up the Cloudflare Worker Proxy
 
-Because `genius.com` blocks direct automated scraper requests with Cloudflare bot challenges (`403 Forbidden`), a free Cloudflare Worker fetches the lyrics through clean mirror instances without anti-bot blocks:
+Because `genius.com` blocks direct automated requests from the Spotify client (CORS and Cloudflare bot challenges), a free Cloudflare Worker fetches the lyrics page for it. The worker looks the song up (through the Genius API when a token is set, otherwise Genius's public search or the predictable `Artist-title-lyrics` address), fetches `genius.com` directly and only falls back to public mirrors, which are often down or behind bot protection. It also accepts `path` so the app can request the romanized page.
 
 1. Create a free worker on [dash.cloudflare.com](https://dash.cloudflare.com/) (**Workers & Pages** → **Create Application** → **Create Worker**).
-2. Click **Edit code** and paste the following snippet:
+2. Click **Edit code** and paste the following snippet. For the most reliable lookup also add your Genius client access token as a `GENIUS_TOKEN` secret, or set it in **Settings → Lyrics** so the app sends it:
 
 ```javascript
+// Cloudflare Worker: returns the HTML of a Genius lyrics page as { html, path }.
+//
+//   GET /?title=...&artist=...            search the song, return its page
+//   GET /?title=...&artist=...&path=/X-lyrics   skip the search, fetch that page
+//                                         (Spicy Lyrics asks for the romanized page this way)
+//
+// Optional: set GENIUS_TOKEN (Worker secret) or send "Authorization: Bearer <token>"
+// to search through the official API, which is the most reliable way to find the song.
+
+const CORS = { "Access-Control-Allow-Origin": "*" };
+const JSON_HEADERS = { "Content-Type": "application/json", ...CORS };
+
+const BROWSER_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+
+// Mirrors are only a fallback: several are behind bot challenges (Anubis) or down.
+const MIRRORS = ["https://dumb.bloat.cat", "https://dumb.jeikobu.net", "https://dumb.ducks.party"];
+
+const json = (body, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+
+// A real lyrics page, not a challenge / error page served with a 200.
+const isLyricsPage = (html) =>
+  /data-lyrics-container="true"|<div id="lyrics"/i.test(html);
+
+// Only plain Genius song slugs: keeps `path` from reaching anything else.
+const SAFE_PATH = /^\/[A-Za-z0-9%_.~'()!*,\-]+-lyrics$/;
+
+const isAltPage = (path) => /^\/Genius-(?:romanizations|.*-translations)-/i.test(path);
+
+async function fetchPage(path) {
+  const urls = [`https://genius.com${path}`, ...MIRRORS.map((m) => `${m}${path}`)];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        headers: BROWSER_HEADERS,
+        cf: { cacheTtl: 86400, cacheEverything: true },
+      });
+      if (!res.ok) continue;
+      const html = await res.text();
+      if (isLyricsPage(html)) return html;
+    } catch {}
+  }
+  return null;
+}
+
+const norm = (s) =>
+  (s || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+function pickHit(hits, title, artist) {
+  const t = norm(title);
+  const a = norm(artist);
+  const songs = hits
+    .map((h) => h.result || h)
+    .filter((r) => r?.path && SAFE_PATH.test(r.path) && !isAltPage(r.path));
+  const score = (r) => {
+    const rt = norm(r.title);
+    const ra = norm(r.primary_artist?.name || r.artist_names);
+    let s = 0;
+    if (rt === t) s += 3;
+    else if (rt.includes(t) || t.includes(rt)) s += 1;
+    if (a && (ra.includes(a) || a.includes(ra))) s += 2;
+    return s;
+  };
+  return songs.sort((x, y) => score(y) - score(x))[0] || null;
+}
+
+async function searchWithApi(token, title, artist) {
+  const res = await fetch(
+    `https://api.genius.com/search?q=${encodeURIComponent(`${title} ${artist}`.trim())}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  return pickHit(data?.response?.hits || [], title, artist)?.path || null;
+}
+
+async function searchPublic(title, artist) {
+  const res = await fetch(
+    `https://genius.com/api/search/multi?q=${encodeURIComponent(`${title} ${artist}`.trim())}`,
+    { headers: { ...BROWSER_HEADERS, Accept: "application/json" } }
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  const songSection = (data?.response?.sections || []).find((s) => s.type === "song");
+  return pickHit(songSection?.hits || [], title, artist)?.path || null;
+}
+
+// Genius slugs are predictable: "Artist Title" -> /Artist-title-lyrics.
+function guessSlug(title, artist) {
+  const combined = `${artist} ${title}`
+    .replace(/&/g, " and ")
+    .replace(/['’"“”.,!?()[\]{}]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  return combined ? `/${combined[0].toUpperCase()}${combined.slice(1).toLowerCase()}-lyrics` : null;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
-          "Access-Control-Allow-Origin": "*",
+          ...CORS,
           "Access-Control-Allow-Methods": "GET, OPTIONS",
           "Access-Control-Allow-Headers": "*",
         },
@@ -77,85 +185,36 @@ export default {
 
     const url = new URL(request.url);
     const title = url.searchParams.get("title");
-    const artist = url.searchParams.get("artist");
+    const artist = url.searchParams.get("artist") || "";
+    const forcedPath = url.searchParams.get("path");
 
-    if (!title) {
-      return new Response(JSON.stringify({ error: "Missing title parameter" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
-    }
+    if (!title) return json({ error: "Missing title parameter" }, 400);
+    if (forcedPath && !SAFE_PATH.test(forcedPath)) return json({ error: "Invalid path" }, 400);
 
-    const token =
-      request.headers.get("Authorization")?.replace("Bearer ", "") ||
-      env.GENIUS_TOKEN ||
-      "";
-
-    let songPath = null;
-
-    if (token) {
-      try {
-        const searchRes = await fetch(
-          `https://api.genius.com/search?q=${encodeURIComponent(title + " " + (artist || ""))}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (searchRes.ok) {
-          const data = await searchRes.json();
-          const hits = data?.response?.hits;
-          if (hits && hits.length > 0) {
-            const hit =
-              hits.find(
-                (h) =>
-                  h.result?.primary_artist?.name?.toLowerCase().includes((artist || "").toLowerCase())
-              ) || hits[0];
-            songPath = hit?.result?.path;
-          }
-        }
-      } catch (e) {}
-    }
-
-    const mirrors = [
-      "https://dumb.bloat.cat",
-      "https://dumb.jeikobu.net",
-      "https://dumb.ducks.party",
-    ];
-
+    const token = request.headers.get("Authorization")?.replace("Bearer ", "") || env.GENIUS_TOKEN || "";
     const cleanTitle = title.replace(/\s*-\s*.*$/g, "").trim();
-    const query = encodeURIComponent(`${cleanTitle} ${artist || ""}`.trim());
 
-    for (const mirror of mirrors) {
+    const candidates = [];
+    if (forcedPath) {
+      candidates.push(forcedPath);
+    } else {
       try {
-        let path = songPath;
-        if (!path) {
-          const searchRes = await fetch(`${mirror}/search?q=${query}`, {
-            headers: { "User-Agent": "Mozilla/5.0" },
-          });
-          if (!searchRes.ok) continue;
-          const searchHtml = await searchRes.text();
-          const match = /<a id="search-item" href="(\/[^"]+-lyrics)"/i.exec(searchHtml);
-          if (!match) continue;
-          path = match[1];
-        }
-
-        const pageRes = await fetch(`${mirror}${path}`, {
-          headers: { "User-Agent": "Mozilla/5.0" },
-        });
-        if (!pageRes.ok) continue;
-        const pageHtml = await pageRes.text();
-
-        return new Response(JSON.stringify({ html: pageHtml, path }), {
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-          },
-        });
-      } catch (err) {}
+        if (token) candidates.push(await searchWithApi(token, cleanTitle, artist));
+      } catch {}
+      try {
+        candidates.push(await searchPublic(cleanTitle, artist));
+      } catch {}
+      candidates.push(guessSlug(cleanTitle, artist));
     }
 
-    return new Response(JSON.stringify({ error: "Lyrics not found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-    });
+    for (const path of [...new Set(candidates.filter(Boolean))]) {
+      const html = await fetchPage(path);
+      if (html) {
+        return new Response(JSON.stringify({ html, path }), { headers: JSON_HEADERS });
+      }
+    }
+
+    return json({ error: "Lyrics not found" }, 404);
   },
 };
 ```

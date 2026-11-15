@@ -32,20 +32,26 @@ export interface GeniusSection {
   singer: string | null;
   lines: GeniusLine[];
   styleMap?: Map<SingerStyle, string>;
+  /**
+   * The header lists several singers one after another but nothing on the lines says
+   * which of them sings which, so no line is attributed. Set so a better source (the
+   * romanized page) can fill the section in.
+   */
+  undetermined?: boolean;
 }
 
 export const GENIUS_EXPIRE_STORE_NAME = "SpicyLyrics_GeniusCache_g1";
 export const GeniusExpireStore = GetExpireStore<{
   sections: GeniusSection[];
   timestamp: number;
-}>(GENIUS_EXPIRE_STORE_NAME, 6, {
+}>(GENIUS_EXPIRE_STORE_NAME, 7, {
   Unit: "Days",
   Duration: 30,
 });
 
 const GENIUS_CACHE = new Map<string, { sections: GeniusSection[]; timestamp: number }>();
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const GENIUS_STORAGE_PREFIX = "spicy-lyrics:genius-cache:v6:";
+const GENIUS_STORAGE_PREFIX = "spicy-lyrics:genius-cache:v7:";
 const LEGACY_STORAGE_PREFIX = "spicy-lyrics:genius-cache:";
 
 const geniusCacheListeners = new Set<() => void>();
@@ -421,13 +427,18 @@ export function computeSimilarity(aRaw: string, bRaw: string): number {
 const genericHeaders =
   /^(Intro|Introduzione|Outro|Finale|Coda|Verse|Strofa|Verso|Couplet|Strophe|Zwrotka|Куплет|Chorus|Ritornello|Estribillo|Coro|Refrain|Refrão|Refren|Припев|Nakarat|Pre-Chorus|Pre-Ritornello|Pre-Estribillo|Pré-Refrain|Pré-Refrão|Pre-Refrain|Предприпев|Post-Chorus|Post-Ritornello|Post-Estribillo|Post-Refrain|Post-Refrão|Bridge|Ponte|Puente|Pont|Бридж|Mostek|Pre-Bridge|Post-Bridge|Hook|Inciso|Stacco|Drop|Break|Breakdown|Beat\s+Switch|Interlude|Interludio|Interlúdio|Instrumental|Strumentale|Solo|Guitar\s+Solo|Skit|Spoken|Segue|Part\s+[0-9IVXLCDM]+|Parte\s+[0-9IVXLCDM]+|Partie\s+[0-9IVXLCDM]+|Section\s+[0-9IVXLCDM]+)(\s+[0-9IVXLCDM]+)?$/i;
 
+/**
+ * Section identity used to carry a singer over to a later header that names none.
+ * The number is part of it: "Verse 2" must not inherit the singer of "Verse 1".
+ */
 function getBaseSectionType(header: string): string | null {
-  const clean = cleanHeaderTitle(header);
+  const clean = cleanHeaderTitle(header).split(":")[0].trim();
   const m =
-    /^(Intro|Introduzione|Outro|Finale|Coda|Verse|Strofa|Verso|Couplet|Strophe|Zwrotka|Куплет|Chorus|Ritornello|Estribillo|Coro|Refrain|Refrão|Refren|Припев|Nakarat|Pre-Chorus|Pre-Ritornello|Pre-Estribillo|Pré-Refrain|Pré-Refrão|Pre-Refrain|Предприпев|Post-Chorus|Post-Ritornello|Post-Estribillo|Post-Refrain|Post-Refrão|Bridge|Ponte|Puente|Pont|Бридж|Mostek|Pre-Bridge|Post-Bridge|Hook|Inciso|Stacco|Drop|Break|Breakdown|Interlude|Interludio|Interlúdio|Instrumental|Strumentale|Solo|Skit|Part\s+[0-9IVXLCDM]+)/i.exec(
+    /^(Intro|Introduzione|Outro|Finale|Coda|Verse|Strofa|Verso|Couplet|Strophe|Zwrotka|Куплет|Chorus|Ritornello|Estribillo|Coro|Refrain|Refrão|Refren|Припев|Nakarat|Pre-Chorus|Pre-Ritornello|Pre-Estribillo|Pré-Refrain|Pré-Refrão|Pre-Refrain|Предприпев|Post-Chorus|Post-Ritornello|Post-Estribillo|Post-Refrain|Post-Refrão|Bridge|Ponte|Puente|Pont|Бридж|Mostek|Pre-Bridge|Post-Bridge|Hook|Inciso|Stacco|Drop|Break|Breakdown|Interlude|Interludio|Interlúdio|Instrumental|Strumentale|Solo|Skit|Part\s+[0-9IVXLCDM]+)(?:\s+([0-9]+|[IVXLCDM]+)\b)?/i.exec(
       clean
     );
-  return m ? m[1].toLowerCase() : null;
+  if (!m) return null;
+  return m[2] ? `${m[1].toLowerCase()} ${m[2].toLowerCase()}` : m[1].toLowerCase();
 }
 
 function isMetadataHeader(header: string): boolean {
@@ -812,6 +823,73 @@ function sectionsHaveCjkSingers(sections: GeniusSection[] | null | undefined): b
   );
 }
 
+/** Index of the `</div>` closing the div whose opening tag ends at `from`, or -1. */
+function findDivEnd(html: string, from: number): number {
+  const re = /<(\/?)div\b[^>]*>/gi;
+  re.lastIndex = from;
+  let depth = 1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    if (m[1]) {
+      depth--;
+      if (depth === 0) return m.index;
+    } else {
+      depth++;
+    }
+  }
+  return -1;
+}
+
+/** Inner markup of every div whose opening tag matches `openRe` (non-nested matches only). */
+function extractDivContents(html: string, openRe: RegExp): string[] {
+  const out: string[] = [];
+  const re = new RegExp(openRe.source, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const start = m.index + m[0].length;
+    const end = findDivEnd(html, start);
+    if (end === -1) break;
+    out.push(html.slice(start, end));
+    re.lastIndex = end;
+  }
+  return out;
+}
+
+/** Drops every div subtree matching `openRe` (Genius headers, ads, embed prompts). */
+function stripDivs(html: string, openRe: RegExp): string {
+  const re = new RegExp(openRe.source, "i");
+  let out = html;
+  for (;;) {
+    const m = re.exec(out);
+    if (!m) return out;
+    const end = findDivEnd(out, m.index + m[0].length);
+    out = out.slice(0, m.index) + (end === -1 ? "" : out.slice(end + "</div>".length));
+    if (end === -1) return out;
+  }
+}
+
+/**
+ * The lyrics part of a Genius page. A lyrics container holds nested divs (header,
+ * contributors), so it is cut at its matching close tag, not the first `</div>`.
+ * `<div id="lyrics">` is only used when it carries text: on genius.com it is an
+ * empty scroll anchor, while on clean mirrors it wraps the lyrics.
+ */
+function extractLyricsMarkup(textOrHtml: string): string {
+  const hasText = (markup: string) => /[\p{L}\p{N}]/u.test(markup.replace(/<[^>]+>/g, ""));
+
+  const containers = extractDivContents(
+    textOrHtml,
+    /<div[^>]*data-lyrics-container="true"[^>]*>/
+  ).map((c) => stripDivs(c, /<div[^>]*data-exclude-from-selection="true"[^>]*>/));
+  const fromContainers = containers.filter(hasText);
+  if (fromContainers.length > 0) return fromContainers.join("\n<br/>\n");
+
+  const dumb = extractDivContents(textOrHtml, /<div id="lyrics"[^>]*>/).find(hasText);
+  if (dumb) return dumb;
+
+  return textOrHtml;
+}
+
 /**
  * Parses raw Genius lyrics text or HTML containing bracketed section/singer tags:
  * e.g. [Verse 1: Drake, <i>21 Savage</i> & <b>Travis Scott</b>], [Chorus: All]
@@ -829,18 +907,7 @@ export function parseGeniusLyrics(
     }
   }
 
-  let content = textOrHtml;
-  const dumbMatch = /<div id="lyrics"[^>]*>([\s\S]*?)<\/div>/i.exec(content);
-  if (dumbMatch) {
-    content = dumbMatch[1];
-  } else {
-    const containerMatches = [
-      ...content.matchAll(/<div[^>]*data-lyrics-container="true"[^>]*>([\s\S]*?)<\/div>/gi),
-    ];
-    if (containerMatches.length > 0) {
-      content = containerMatches.map((m) => m[1]).join("\n<br/>\n");
-    }
-  }
+  const content = extractLyricsMarkup(textOrHtml);
 
   const docHasHtmlFormatting = /<\/?(?:i|em|b|strong)\b/i.test(content);
 
@@ -933,6 +1000,8 @@ export function parseGeniusLyrics(
     singers: string[];
     hasExplicitStyles: boolean;
     collectiveTokens: Array<{ style: SingerStyle; inParen: boolean }>;
+    /** The header joins singers with "&" / "and": they sing together, not in turn. */
+    togetherHint: boolean;
     rawLines: Array<{ segments: Segment[]; fullText: string }>;
   }
 
@@ -944,6 +1013,7 @@ export function parseGeniusLyrics(
     singers: [],
     hasExplicitStyles: false,
     collectiveTokens: [],
+    togetherHint: false,
     rawLines: [],
   };
 
@@ -975,6 +1045,9 @@ export function parseGeniusLyrics(
         singers,
         hasExplicitStyles,
         collectiveTokens: collectiveTokens ?? [],
+        togetherHint: /[&+＆＋]|\s(?:and|with)\s/i.test(
+          innerPlain.includes(":") ? innerPlain.slice(innerPlain.indexOf(":") + 1) : ""
+        ),
         rawLines: [],
       };
     } else {
@@ -1030,25 +1103,28 @@ export function parseGeniusLyrics(
       styleMap: Map<SingerStyle, string>;
       singers: string[];
       hasExplicitStyles: boolean;
+      togetherHint: boolean;
     }
   >();
   for (const sec of rawSections) {
     const baseType = getBaseSectionType(sec.header);
     if (sec.singer && baseType) {
-      if (!sectionTypeMemory.has(baseType)) {
-        sectionTypeMemory.set(baseType, {
-          singer: sec.singer,
-          styleMap: new Map(sec.styleMap),
-          singers: [...sec.singers],
-          hasExplicitStyles: sec.hasExplicitStyles,
-        });
-      }
+      // The latest labelled occurrence wins, so a bare "[Chorus]" repeats the
+      // singer of the chorus just before it rather than the very first one.
+      sectionTypeMemory.set(baseType, {
+        singer: sec.singer,
+        styleMap: new Map(sec.styleMap),
+        singers: [...sec.singers],
+        hasExplicitStyles: sec.hasExplicitStyles,
+        togetherHint: sec.togetherHint,
+      });
     } else if (!sec.singer && baseType && sectionTypeMemory.has(baseType)) {
       const mem = sectionTypeMemory.get(baseType)!;
       sec.singer = mem.singer;
       sec.styleMap = new Map(mem.styleMap);
       sec.singers = [...mem.singers];
       sec.hasExplicitStyles = mem.hasExplicitStyles;
+      sec.togetherHint = mem.togetherHint;
     }
   }
 
@@ -1079,6 +1155,7 @@ export function parseGeniusLyrics(
     }
 
     const parsedLines: GeniusLine[] = [];
+    let sectionHasInlineSinger = false;
 
     for (const { segments, fullText } of sec.rawLines) {
       interface StyledRun {
@@ -1179,6 +1256,7 @@ export function parseGeniusLyrics(
           )
         ) {
           explicitLineSinger = mergeSingerNames([prefix]);
+          sectionHasInlineSinger = true;
           cleanText = rest;
         }
       }
@@ -1260,6 +1338,38 @@ export function parseGeniusLyrics(
         parenSinger,
         style: lineStyle,
       });
+    }
+
+    // Several singers named in turn, no styling anywhere on the lines (ad-libs in
+    // parentheses don't count) and nothing saying they sing together: the page gives
+    // no way to tell who sings which line. Guessing "the first name" or "all of them"
+    // is wrong for most lines, so leave the section unattributed.
+    const lineStyles = new Set(parsedLines.map((l) => l.style));
+    const isChorusLike = /chorus|refrain|hook|ritornello|estribillo|refr[aã]o/i.test(
+      getBaseSectionType(sec.header) ?? ""
+    );
+    const undetermined =
+      parsedLines.length > 0 &&
+      sec.singers.length >= 2 &&
+      sec.collectiveTokens.length === 0 &&
+      !sec.togetherHint &&
+      !sec.hasExplicitStyles &&
+      !sectionHasInlineSinger &&
+      !isChorusLike &&
+      lineStyles.size <= 1;
+    if (undetermined) {
+      for (const l of parsedLines) {
+        l.singer = null;
+        l.parenSinger = null;
+      }
+      sections.push({
+        header: sec.header,
+        singer: null,
+        lines: parsedLines,
+        styleMap: new Map(),
+        undetermined: true,
+      });
+      continue;
     }
 
     const mappedStyleMap = new Map<SingerStyle, string>();
@@ -1477,6 +1587,50 @@ async function romanizeRemainingCjkSingers(
 }
 
 /**
+ * Fills sections the original page left undetermined from the romanized page's
+ * matching sections (same header, same occurrence, same number of lines).
+ */
+export function mergeUndeterminedSections(
+  base: GeniusSection[],
+  rom: GeniusSection[]
+): GeniusSection[] {
+  const norm = (h: string) => h.toLowerCase().replace(/:.*$/, "").replace(/\s+/g, " ").trim();
+  const romByHeader = new Map<string, GeniusSection[]>();
+  for (const sec of rom) {
+    const k = norm(sec.header);
+    if (!romByHeader.has(k)) romByHeader.set(k, []);
+    romByHeader.get(k)!.push(sec);
+  }
+  const seen = new Map<string, number>();
+  return base.map((sec) => {
+    const k = norm(sec.header);
+    const occurrence = seen.get(k) ?? 0;
+    seen.set(k, occurrence + 1);
+    if (!sec.undetermined) return sec;
+    const match = romByHeader.get(k)?.[occurrence];
+    if (
+      !match ||
+      match.undetermined ||
+      match.lines.length !== sec.lines.length ||
+      !match.lines.some((l) => l.singer)
+    ) {
+      return sec;
+    }
+    return {
+      header: sec.header,
+      singer: match.singer,
+      styleMap: match.styleMap,
+      lines: sec.lines.map((l, i) => ({
+        ...l,
+        singer: match.lines[i].singer,
+        parenSinger: match.lines[i].parenSinger,
+        style: match.lines[i].style,
+      })),
+    };
+  });
+}
+
+/**
  * Searches Genius and fetches the lyrics section breakdown.
  */
 export async function fetchGeniusSections(
@@ -1550,41 +1704,41 @@ export async function fetchGeniusSections(
 
   let foundSections: GeniusSection[] | null = null;
 
-  // 1. If custom proxy URL is configured (e.g. Cloudflare Worker or local service), use it
-  if (proxyUrl) {
+  const proxyFetchSections = async (
+    extraParams: Record<string, string> = {}
+  ): Promise<GeniusSection[] | null> => {
+    if (!proxyUrl) return null;
     try {
       const u = new URL(proxyUrl);
       u.searchParams.set("title", cleanTitle);
       u.searchParams.set("artist", cleanArt);
+      for (const [k, v] of Object.entries(extraParams)) u.searchParams.set(k, v);
       const headers: Record<string, string> = { Accept: "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       geniusLogger.debug("Fetching from Genius proxy", { url: u.toString() });
       const res = await fetch(u.toString(), { headers });
-      if (res.ok) {
-        const data = await res.json();
-        let sections: GeniusSection[] | null = null;
-        if (typeof data.html === "string") {
-          sections = parseGeniusLyrics(data.html);
-        } else if (typeof data.lyrics === "string") {
-          sections = parseGeniusLyrics(data.lyrics);
-        } else if (Array.isArray(data.sections)) {
-          sections = data.sections;
-        }
-        if (sections && sections.some((s) => s.singer || s.lines.some((l) => l.singer))) {
-          if (!sectionsHaveCjkSingers(sections)) {
-            saveToCache(sections);
-            return sections;
-          }
-          foundSections = sections;
-        }
-      } else {
+      if (!res.ok) {
         geniusLogger.warn("Genius proxy returned error", { status: res.status });
+        return null;
       }
+      const data = await res.json();
+      let sections: GeniusSection[] | null = null;
+      if (typeof data.html === "string") {
+        sections = parseGeniusLyrics(data.html);
+      } else if (typeof data.lyrics === "string") {
+        sections = parseGeniusLyrics(data.lyrics);
+      } else if (Array.isArray(data.sections)) {
+        sections = data.sections;
+      }
+      return sections && sections.some((s) => s.singer || s.lines.some((l) => l.singer))
+        ? sections
+        : null;
     } catch (err) {
       geniusLogger.warn("Failed fetching from Genius proxy", err);
+      return null;
     }
-  }
+  };
 
   const tryScrapeSongPath = async (songUrlOrPath: string): Promise<GeniusSection[] | null> => {
     let pathPart = songUrlOrPath;
@@ -1612,6 +1766,30 @@ export async function fetchGeniusSections(
     }
     return null;
   };
+
+  // The original page often only lists who sings a verse, while the romanized page
+  // marks which line belongs to whom. Sections left undetermined are filled in from it.
+  const refineUndetermined = async (sections: GeniusSection[]): Promise<GeniusSection[]> => {
+    if (!sections.some((s) => s.undetermined)) return sections;
+    const romPath = buildGeniusRomanizedSlugPath(cleanArt, cleanTitle);
+    if (!romPath) return sections;
+    const rom =
+      (await proxyFetchSections({ path: romPath })) ?? (await tryScrapeSongPath(romPath));
+    return rom ? mergeUndeterminedSections(sections, rom) : sections;
+  };
+
+  // 1. If custom proxy URL is configured (e.g. Cloudflare Worker or local service), use it
+  {
+    const sections = await proxyFetchSections();
+    if (sections) {
+      if (!sectionsHaveCjkSingers(sections)) {
+        const refined = await refineUndetermined(sections);
+        saveToCache(refined);
+        return refined;
+      }
+      foundSections = sections;
+    }
+  }
 
   // 2. If token is provided, query Genius API for the song URL
   if (!foundSections && token) {
@@ -1643,8 +1821,9 @@ export async function fetchGeniusSections(
             const sections = await tryScrapeSongPath(songUrl);
             if (sections) {
               if (!sectionsHaveCjkSingers(sections)) {
-                saveToCache(sections);
-                return sections;
+                const refined = await refineUndetermined(sections);
+                saveToCache(refined);
+                return refined;
               }
               foundSections = sections;
             }
@@ -1724,6 +1903,7 @@ export async function fetchGeniusSections(
 
   if (foundSections) {
     foundSections = await romanizeRemainingCjkSingers(foundSections);
+    foundSections = await refineUndetermined(foundSections);
     saveToCache(foundSections);
     return foundSections;
   }
@@ -1813,12 +1993,9 @@ export function alignGeniusSingers(
 
   if (flatG.length === 0 || !flatG.some((g) => g.singer)) return false;
 
-  // Fill any null singers in flatG (e.g. Intro without explicit singer) from nearest neighbor
-  const firstValidSinger = flatG.find((g) => g.singer)?.singer ?? null;
-  let runningSinger = firstValidSinger;
+  // A section Genius names no singer for stays unattributed: borrowing the previous
+  // section's singer would put the wrong name on every line of it.
   for (const g of flatG) {
-    if (g.singer) runningSinger = g.singer;
-    else g.singer = runningSinger;
     if (!g.parenSinger) g.parenSinger = g.singer;
   }
 
@@ -1865,6 +2042,7 @@ export function alignGeniusSingers(
   const SKIP_S_PENALTY = -0.06;
   const SKIP_G_PENALTY = -0.03;
   const MIN_MATCH_SCORE = 0.42;
+  const MIN_MATCHED_FRACTION = 0.4;
 
   for (let i = 1; i <= N; i++) {
     dp[i * cols] = dp[(i - 1) * cols] + SKIP_S_PENALTY;
@@ -1929,6 +2107,8 @@ export function alignGeniusSingers(
     parenSinger: string | null;
     style: SingerStyle;
     sectionIdx: number;
+    /** Index of the matched Genius line in `flatG` (the later one for a merge). */
+    gIdx: number;
   }
 
   const assigned: Array<MatchAssignment | null> = Array.from({ length: N }, () => null);
@@ -1945,6 +2125,7 @@ export function alignGeniusSingers(
         parenSinger: g.parenSinger,
         style: g.style,
         sectionIdx: g.sectionIdx,
+        gIdx: cj - 1,
       };
       matchedCount++;
       if (act === 3) {
@@ -1961,6 +2142,7 @@ export function alignGeniusSingers(
         parenSinger: mergeSingerNames([g1.parenSinger, g2.parenSinger]),
         style: g1.style,
         sectionIdx: g2.sectionIdx,
+        gIdx: cj - 1,
       };
       matchedCount++;
       ci--;
@@ -1972,23 +2154,54 @@ export function alignGeniusSingers(
     }
   }
 
-  if (matchedCount === 0) return false;
+  // Too few lines found their Genius counterpart (a different version or language of
+  // the song): the few that did say nothing about the rest, and spreading them over
+  // the whole song would stamp one section's singer everywhere.
+  if (matchedCount < Math.max(2, Math.ceil(N * MIN_MATCHED_FRACTION))) return false;
 
-  // Fill any unmatched Spotify lines from nearest matched neighbor
-  let lastMatch: MatchAssignment | null = null;
+  // Lines with no counterpart sit between two matched lines. Place each at its
+  // proportional position in the Genius lines between those two, so a line right
+  // after a section change takes the new section's singer instead of the old one.
+  const matchedAt: number[] = [];
   for (let i = 0; i < N; i++) {
-    if (assigned[i]) {
-      lastMatch = assigned[i];
-    } else if (lastMatch) {
-      assigned[i] = { ...lastMatch };
-    }
+    if (assigned[i]) matchedAt.push(i);
   }
-  let nextMatch: MatchAssignment | null = null;
-  for (let i = N - 1; i >= 0; i--) {
-    if (assigned[i]) {
-      nextMatch = assigned[i];
-    } else if (nextMatch) {
-      assigned[i] = { ...nextMatch };
+  const pickFromG = (gPos: number, fallback: MatchAssignment): MatchAssignment => {
+    const g = flatG[Math.min(flatG.length - 1, Math.max(0, gPos))];
+    return g
+      ? {
+          singer: g.singer,
+          parenSinger: g.parenSinger,
+          style: g.style,
+          sectionIdx: g.sectionIdx,
+          gIdx: gPos,
+        }
+      : { ...fallback };
+  };
+  for (let i = 0; i < N; i++) {
+    if (assigned[i]) continue;
+    let prevI = -1;
+    let nextI = -1;
+    for (const mi of matchedAt) {
+      if (mi < i) prevI = mi;
+      else {
+        nextI = mi;
+        break;
+      }
+    }
+    const prev = prevI >= 0 ? assigned[prevI]! : null;
+    const next = nextI >= 0 ? assigned[nextI]! : null;
+    if (!prev && next) {
+      assigned[i] = { ...next };
+    } else if (prev && !next) {
+      assigned[i] = { ...prev };
+    } else if (prev && next) {
+      if (prev.sectionIdx === next.sectionIdx) {
+        assigned[i] = { ...prev };
+      } else {
+        const t = prev.gIdx + ((i - prevI) / (nextI - prevI)) * (next.gIdx - prev.gIdx);
+        assigned[i] = pickFromG(Math.round(t), prev);
+      }
     }
   }
 
