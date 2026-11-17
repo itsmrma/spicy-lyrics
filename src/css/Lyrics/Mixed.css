@@ -503,11 +503,21 @@
   scale: var(--DefaultEmphasisLyricsScale);
 } */
 
+/* A group stays whole on one line while it fits. A run with no spaces, such as
+   Japanese or Chinese, is one group wider than the view, so it may wrap between
+   syllables rather than run past the edge. */
 #SpicyLyricsPage.SpicyRenderer .word-group {
   display: inline-flex;
   white-space: nowrap;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: flex-start;
+  max-width: 100%;
+  min-width: 0;
+}
+
+#SpicyLyricsPage.SpicyRenderer .LyricsContainer .LyricsContent .line .word {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 #SpicyLyricsPage.SpicyRenderer .OppositeAligned .word-group {
